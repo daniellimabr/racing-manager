@@ -4,7 +4,9 @@ import type { TrackDef, CarSetup } from '../src/core/types.js';
 
 const track: TrackDef = {
   id: 'test', name: 'Test Track', laps: 2, pitAfterLap: 1,
-  corners: [{ id: 'c1', name: 'Curva 1' }, { id: 'c2', name: 'Curva 2' }],
+  path: [{ x: 0, y: 0 }, { x: 0.5, y: 0 }, { x: 1, y: 0.5 }],
+  pitPathIndex: 2,
+  corners: [{ id: 'c1', name: 'Curva 1', pathIndex: 0 }, { id: 'c2', name: 'Curva 2', pathIndex: 1 }],
 };
 const setup: CarSetup = { zoneScale: 1, healthMax: 100, nitroCharges: 1 };
 

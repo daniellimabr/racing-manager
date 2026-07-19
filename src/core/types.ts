@@ -7,6 +7,14 @@ export type BoostId = 'pneu' | 'freio' | 'janela';
 export interface CornerDef {
   id: string;
   name: string;
+  /** índice em `TrackDef.path` onde este desafio fica posicionado no traçado */
+  pathIndex: number;
+}
+
+/** Ponto normalizado (0..1 em x e y) do traçado, para desenho independente de resolução */
+export interface TrackPoint {
+  x: number;
+  y: number;
 }
 
 export interface TrackDef {
@@ -15,6 +23,10 @@ export interface TrackDef {
   laps: number;
   /** Volta (1-indexed) após a qual o pit stop obrigatório acontece */
   pitAfterLap: number;
+  /** Polilinha normalizada (0..1) do traçado, loop fechado (o último ponto conecta de volta ao primeiro) */
+  path: TrackPoint[];
+  /** índice em `path` onde a entrada do pit fica posicionada */
+  pitPathIndex: number;
   corners: CornerDef[];
 }
 

@@ -4,7 +4,9 @@ import type { TrackDef } from '../src/core/types.js';
 
 const spa: TrackDef = {
   id: 'spa', name: 'Spa', laps: 8, pitAfterLap: 4,
-  corners: Array.from({ length: 9 }, (_, i) => ({ id: `c${i}`, name: `Curva ${i}` })),
+  path: Array.from({ length: 10 }, (_, i) => ({ x: i / 10, y: i / 10 })),
+  pitPathIndex: 9,
+  corners: Array.from({ length: 9 }, (_, i) => ({ id: `c${i}`, name: `Curva ${i}`, pathIndex: i })),
 };
 
 describe('buildEventSequence', () => {
