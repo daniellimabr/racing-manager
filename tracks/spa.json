@@ -1,0 +1,17 @@
+{
+  "id": "spa",
+  "name": "Spa-Francorchamps",
+  "laps": 8,
+  "pitAfterLap": 4,
+  "corners": [
+    { "id": "la-source", "name": "La Source" },
+    { "id": "eau-rouge-raidillon", "name": "Eau Rouge + Raidillon" },
+    { "id": "les-combes", "name": "Les Combes" },
+    { "id": "bruxelles", "name": "Bruxelles / Rivage" },
+    { "id": "pouhon", "name": "Pouhon" },
+    { "id": "fagnes", "name": "Fagnes" },
+    { "id": "stavelot", "name": "Stavelot" },
+    { "id": "blanchimont", "name": "Blanchimont" },
+    { "id": "bus-stop", "name": "Bus Stop" }
+  ]
+}
