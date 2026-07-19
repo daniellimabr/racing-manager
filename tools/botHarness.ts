@@ -10,7 +10,7 @@ import path from 'node:path';
 import {
   createRace, currentEvent, resolveCurrent, advance, revive, tryUseNitro, toRaceOutput,
 } from '../src/core/index.js';
-import { tierFromPosition, zoneHalves, computeScale, canAttemptOvertake } from '../src/core/timing.js';
+import { tierFromPosition, zoneHalves, computeScale, canAttemptOvertake, rollTier } from '../src/core/timing.js';
 import type { TrackDef, Tier, CarSetup } from '../src/core/types.js';
 
 interface Profile {
@@ -27,16 +27,6 @@ const PROFILES: Profile[] = [
   { name: 'Skilled', weights: { purple: 0.35, green: 0.45, amber: 0.17, red: 0.02, miss: 0.01 }, overtakeIfClose: true, nitroPolicy: 'onOvertake' },
   { name: 'Temerário', weights: { purple: 0.15, green: 0.30, amber: 0.30, red: 0.20, miss: 0.05 }, overtakeIfClose: true, nitroPolicy: 'always' },
 ];
-
-function pickTier(weights: Record<Tier, number>): Tier {
-  const r = Math.random();
-  let acc = 0;
-  for (const tier of ['purple', 'green', 'amber', 'red', 'miss'] as Tier[]) {
-    acc += weights[tier];
-    if (r <= acc) return tier;
-  }
-  return 'miss';
-}
 
 function loadTrack(): TrackDef {
   const p = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../tracks/spa.json');
@@ -75,7 +65,7 @@ function simulateOne(track: TrackDef, profile: Profile) {
       gap: s.gapToAhead, pendingBoostIsPneu: s.pendingBoost === 'pneu',
     });
     const halves = zoneHalves(scale);
-    const tier = pickTier(profile.weights);
+    const tier = rollTier(profile.weights);
     // valida que o tier sorteado é alcançável dado o "cursor" simulado (aqui já é direto o tier)
     void tierFromPosition(50, halves);
 

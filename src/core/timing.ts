@@ -54,3 +54,14 @@ export function computeScale(opts: ScaleOptions): number {
 export function canAttemptOvertake(gap: number): boolean {
   return Math.abs(gap) < OVERTAKE_GAP_THRESHOLD;
 }
+
+/** Sorteia um tier dado uma distribuição de probabilidades (usado por IAs e bots). */
+export function rollTier(weights: Record<Tier, number>, rng: () => number = Math.random): Tier {
+  const r = rng();
+  let acc = 0;
+  for (const tier of ['purple', 'green', 'amber', 'red', 'miss'] as Tier[]) {
+    acc += weights[tier];
+    if (r <= acc) return tier;
+  }
+  return 'miss';
+}
