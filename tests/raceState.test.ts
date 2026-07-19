@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createRace, currentEvent, resolveCurrent, advance, revive, tryUseNitro, toRaceOutput } from '../src/core/raceState.js';
+import { POSITION_UNIT_SECONDS } from '../src/core/constants.js';
 import type { TrackDef, CarSetup } from '../src/core/types.js';
 
 const track: TrackDef = {
@@ -19,9 +20,9 @@ describe('createRace', () => {
   });
 });
 
-describe('resolveCurrent — gap e ultrapassagem', () => {
+describe('resolveCurrent — gap e posição (progresso cumulativo, T-107)', () => {
   it('resultado perfeito reduz o gap e não causa dano', () => {
-    const s = createRace(track, setup, { startGap: 1.5 });
+    const s = createRace(track, setup);
     advance(s); // sai da largada, vai para 1ª frenagem
     const before = s.gapToAhead;
     const r = resolveCurrent(s, 'purple', { nitroUsed: false });
@@ -29,20 +30,30 @@ describe('resolveCurrent — gap e ultrapassagem', () => {
     expect(r.damage).toBe(0);
   });
 
-  it('ultrapassagem acontece quando o gap cruza de positivo para negativo', () => {
-    const s = createRace(track, setup, { startGap: 0.1 }); // bem perto, atrás
+  it('ultrapassagem acontece quando o progresso acumulado cruza o limiar da próxima posição', () => {
+    // startProgress deixado bem perto do limiar (1 posição = POSITION_UNIT_SECONDS)
+    const s = createRace(track, setup, { startProgress: POSITION_UNIT_SECONDS - 0.05 });
     advance(s); // 1ª frenagem
-    const r = resolveCurrent(s, 'purple', { nitroUsed: false }); // ganha 0.30s > 0.1s de gap
-    expect(s.gapToAhead).toBeLessThan(0);
+    const r = resolveCurrent(s, 'purple', { nitroUsed: false }); // ganha 0.30s, cruza o limiar
     expect(r.positionChanged).toBe('gained');
+    expect(s.position).toBe(5); // largou em 6 (padrão)
+    expect(s.gapToAhead).toBeGreaterThan(0); // gap "fresco" contra o PRÓXIMO carro à frente
   });
 
-  it('ser ultrapassado acontece quando o gap cruza de negativo para positivo', () => {
-    const s = createRace(track, setup, { startGap: -0.1 }); // já um pouco à frente
+  it('ser ultrapassado acontece quando o progresso acumulado cai de volta pro limiar anterior', () => {
+    // já dentro do "balde" da posição 5 (1 unidade abaixo da largada)
+    const s = createRace(track, setup, { startProgress: POSITION_UNIT_SECONDS + 0.05 });
     advance(s);
-    const r = resolveCurrent(s, 'miss', { nitroUsed: false }); // perde 0.40s
+    const r = resolveCurrent(s, 'miss', { nitroUsed: false }); // perde 0.40s, cai de volta pro balde da posição 6
     expect(s.gapToAhead).toBeGreaterThan(0);
     expect(r.positionChanged).toBe('lost');
+    expect(s.position).toBe(6);
+  });
+
+  it('a posição inicial já reflete o startProgress (sem esperar o 1º evento)', () => {
+    // 2 unidades inteiras de vantagem acumulada = 2 posições à frente da largada padrão
+    const s = createRace(track, setup, { startProgress: 2 * POSITION_UNIT_SECONDS + 0.05 });
+    expect(s.position).toBe(4); // largada padrão é 6; 2 unidades de vantagem = 2 posições
   });
 
   it('nitro melhora um resultado bom em +10% e reduz a penalidade de um erro', () => {
@@ -70,7 +81,7 @@ describe('saúde e DNF', () => {
   it('saúde some após falhas seguidas e dispara DNF', () => {
     const s = createRace(track, setup);
     advance(s);
-    for (let i = 0; i < 10 && !s.dnf; i++) resolveCurrent(s, 'miss', { nitroUsed: false });
+    for (let i = 0; i < 20 && !s.dnf; i++) resolveCurrent(s, 'miss', { nitroUsed: false });
     expect(s.dnf).toBe(true);
     expect(s.dnfReason).toBe('batida forte');
   });
@@ -78,12 +89,12 @@ describe('saúde e DNF', () => {
   it('revive só funciona 1x por corrida e restaura metade da saúde', () => {
     const s = createRace(track, setup);
     advance(s);
-    for (let i = 0; i < 10 && !s.dnf; i++) resolveCurrent(s, 'miss', { nitroUsed: false });
+    for (let i = 0; i < 20 && !s.dnf; i++) resolveCurrent(s, 'miss', { nitroUsed: false });
     expect(revive(s)).toBe(true);
     expect(s.health).toBe(50);
     expect(s.dnf).toBe(false);
 
-    for (let i = 0; i < 10 && !s.dnf; i++) resolveCurrent(s, 'miss', { nitroUsed: false });
+    for (let i = 0; i < 20 && !s.dnf; i++) resolveCurrent(s, 'miss', { nitroUsed: false });
     expect(s.dnf).toBe(true);
     expect(revive(s)).toBe(false); // já usou
   });

@@ -68,8 +68,11 @@ export interface RaceState {
   health: number;
   healthMax: number;
   position: number;
+  startPosition: number;
   gridSize: number;
-  gapToAhead: number; // segundos: positivo = atrás, negativo = à frente
+  /** soma acumulada (nunca reseta) do ganho/perda de tempo desde a largada — define a posição */
+  raceProgress: number;
+  gapToAhead: number; // segundos: positivo = atrás, negativo = à frente (derivado de raceProgress, ver resolveCurrent)
   nitro: number;
   usedRevive: boolean;
   pendingBoost: BoostId | null;

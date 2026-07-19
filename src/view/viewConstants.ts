@@ -1,4 +1,5 @@
 import type { BoostId, Tier } from '../core/types.js';
+export { DEFAULT_CAR_SETUP } from '../core/constants.js';
 
 /** Constantes de "feel" da view (não fazem parte do core — são puramente de apresentação/input). */
 
@@ -52,6 +53,4 @@ export const TEAM_COLORS: Record<string, number> = {
   echo: 0xcc66ff,
 };
 
-/** valores padrão do carro do jogador até o Manager alimentar o RaceInput de verdade (M2) */
-export const DEFAULT_CAR_SETUP = { zoneScale: 1, healthMax: 100, nitroCharges: 3 };
 export const DEFAULT_PIT_CREW_QUALITY = 0.5;

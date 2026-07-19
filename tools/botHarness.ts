@@ -11,7 +11,8 @@ import {
   createRace, currentEvent, resolveCurrent, advance, revive, tryUseNitro, toRaceOutput,
 } from '../src/core/index.js';
 import { tierFromPosition, zoneHalves, computeScale, canAttemptOvertake, rollTier } from '../src/core/timing.js';
-import type { TrackDef, Tier, CarSetup } from '../src/core/types.js';
+import { DEFAULT_CAR_SETUP } from '../src/core/constants.js';
+import type { TrackDef, Tier } from '../src/core/types.js';
 
 interface Profile {
   name: string;
@@ -34,8 +35,7 @@ function loadTrack(): TrackDef {
 }
 
 function simulateOne(track: TrackDef, profile: Profile) {
-  const setup: CarSetup = { zoneScale: 1, healthMax: 100, nitroCharges: 3 };
-  const s = createRace(track, setup);
+  const s = createRace(track, DEFAULT_CAR_SETUP);
   let killerCorners: Record<string, number> = {};
   let stepsTaken = 0;
 
@@ -99,10 +99,12 @@ function main() {
 
     const avgPos = (positions.reduce((a, b) => a + b, 0) / positions.length).toFixed(2);
     const dnfRate = ((dnfCount / N) * 100).toFixed(1);
+    const winRate = ((positions.filter((p) => p === 1).length / N) * 100).toFixed(1);
+    const podiumRate = ((positions.filter((p) => p <= 3).length / N) * 100).toFixed(1);
     const topKillers = Object.entries(killerAgg).sort((a, b) => b[1] - a[1]).slice(0, 3)
       .map(([k, v]) => `${k} (${v})`).join(', ');
 
-    console.log(`${profile.name.padEnd(12)} | pos. média: ${avgPos.padStart(5)} | DNF: ${dnfRate.padStart(5)}% | curvas assassinas: ${topKillers}`);
+    console.log(`${profile.name.padEnd(12)} | pos. média: ${avgPos.padStart(5)} | DNF: ${dnfRate.padStart(5)}% | vitórias: ${winRate.padStart(5)}% | pódio: ${podiumRate.padStart(5)}% | curvas assassinas: ${topKillers}`);
   }
   console.log('');
 }

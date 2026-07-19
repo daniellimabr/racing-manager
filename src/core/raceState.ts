@@ -3,23 +3,28 @@ import type {
   ResolveOptions, ResolveResult, RaceOutput,
 } from './types.js';
 import { buildEventSequence } from './track.js';
-import { GAIN, DAMAGE, NITRO_GOOD_BONUS, NITRO_BAD_RELIEF } from './constants.js';
+import { GAIN, DAMAGE, NITRO_GOOD_BONUS, NITRO_BAD_RELIEF, POSITION_UNIT_SECONDS } from './constants.js';
 
 export function createRace(
   track: TrackDef,
   setup: CarSetup,
-  opts: { gridSize?: number; startPosition?: number; startGap?: number } = {}
+  opts: { gridSize?: number; startPosition?: number; startProgress?: number } = {}
 ): RaceState {
-  return {
+  const startPosition = opts.startPosition ?? 6;
+  const gridSize = opts.gridSize ?? 12;
+  const raceProgress = opts.startProgress ?? 0;
+  const state: RaceState = {
     track,
     events: buildEventSequence(track),
     eventIndex: 0,
     lap: 1,
     health: setup.healthMax,
     healthMax: setup.healthMax,
-    position: opts.startPosition ?? 6,
-    gridSize: opts.gridSize ?? 12,
-    gapToAhead: opts.startGap ?? 1.5,
+    position: positionFromProgress(startPosition, raceProgress, gridSize),
+    startPosition,
+    gridSize,
+    raceProgress,
+    gapToAhead: 0, // recalculado abaixo
     nitro: setup.nitroCharges,
     usedRevive: false,
     pendingBoost: null,
@@ -29,6 +34,26 @@ export function createRace(
     dnf: false,
     log: [],
   };
+  state.gapToAhead = computeGapToAhead(state);
+  return state;
+}
+
+/** Posição derivada do progresso acumulado — mesma fórmula usada na largada e a cada evento resolvido. */
+function positionFromProgress(startPosition: number, raceProgress: number, gridSize: number): number {
+  const steps = Math.floor(raceProgress / POSITION_UNIT_SECONDS);
+  return Math.min(gridSize, Math.max(1, startPosition - steps));
+}
+
+/**
+ * Segundos de vantagem que ainda faltam pra alcançar a próxima posição
+ * (positivo = atrás, negativo = à frente) — derivado de `raceProgress`, nunca
+ * armazenado independentemente. Ver POSITION_UNIT_SECONDS em constants.ts.
+ */
+function computeGapToAhead(state: RaceState): number {
+  if (state.position <= 1) return -POSITION_UNIT_SECONDS; // já é o líder, não há "carro à frente"
+  const stepsToNextPosition = state.startPosition - (state.position - 1);
+  const thresholdForNextPosition = stepsToNextPosition * POSITION_UNIT_SECONDS;
+  return thresholdForNextPosition - state.raceProgress;
 }
 
 export function currentEvent(state: RaceState): RaceEvent {
@@ -67,21 +92,18 @@ export function resolveCurrent(state: RaceState, tier: Tier, opts: ResolveOption
   if (opts.nitroUsed) gain = gain >= 0 ? gain * NITRO_GOOD_BONUS : gain * NITRO_BAD_RELIEF;
   if (isSaida) gain *= 0.5;
 
-  const prevGap = state.gapToAhead;
-  state.gapToAhead = prevGap - gain;
+  state.raceProgress += gain;
 
   let positionChanged: 'gained' | 'lost' | null = null;
   if (!isSaida) {
-    if (prevGap > 0 && state.gapToAhead <= 0) {
-      state.position = Math.max(1, state.position - 1);
-      positionChanged = 'gained';
-    } else if (prevGap <= 0 && state.gapToAhead > 0) {
-      state.position = Math.min(state.gridSize, state.position + 1);
-      positionChanged = 'lost';
-    }
+    const newPosition = positionFromProgress(state.startPosition, state.raceProgress, state.gridSize);
+    if (newPosition < state.position) positionChanged = 'gained';
+    else if (newPosition > state.position) positionChanged = 'lost';
+    state.position = newPosition;
     state.pendingBoost = null;
     state.overtakeAttempt = false;
   }
+  state.gapToAhead = computeGapToAhead(state);
 
   const message = `${gain >= 0 ? 'ganhou' : 'perdeu'} ${Math.abs(gain).toFixed(2)}s`;
   state.log.push(`volta ${ev.lap} · ${ev.cornerName ?? ev.kind} (${ev.kind}): ${tier} — ${message}`);
