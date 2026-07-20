@@ -2,7 +2,7 @@
 
 > Documento vivo mantido pelo agente TechLead-Racing (ver protocolo em Claude-Tech.md, seção 1.1).
 > Anexar junto com CLAUDE.md e Claude-Tech.md em conversas sobre a trilha Racing.
-> Última atualização: 2026-07-19 (sessão 2 — trabalho autônomo com o PO ausente: T-003 finalizada, Sprint 2 completo (T-101 a T-104), T-107 rodada 1)
+> Última atualização: 2026-07-19 (sessão 2, 2ª metade — T-005 feita, verificação de pit/resumo natural fechada, 1 crash real corrigido, traçado de Spa redesenhado a pedido do PO)
 
 ## 1. Status do backlog
 
@@ -12,7 +12,7 @@
 | T-002 Core extraído + testes | ✅ Feito | (sessão 1) |
 | T-003 Pista como dado + render de debug | ✅ **Feito nesta sessão** | schema ganhou `path`/`pitPathIndex`/`pathIndex` (faltava na sessão 1); `track-debug.html` — ver seção 2.1 |
 | T-004 Harness de bots | ✅ Feito | (sessão 1); estendido nesta sessão com métricas de vitória/pódio |
-| T-005 Telemetria (PostHog) | ⏳ Não iniciado | Conta criada pelo PO (ver Claude-Tech.md), mas a integração (`analytics.ts`) ainda não foi feita — não estava na ordem de prioridade desta sessão |
+| T-005 Telemetria (PostHog) | ✅ **Feito nesta sessão** | Wrapper + modo offline + `session_start`/`session_end`/`race_start`/`race_end` — ver seção 2.5. Restante dos eventos v1 é escopo do T-108 |
 | T-006 Deploy contínuo | 🚫 **Bloqueada** | Depende de conta Vercel/Netlify/GitHub Pages que só o PO pode criar — não tentada, conforme instrução |
 | T-101 Simulação de grid (12 carros) | ✅ **Feito nesta sessão** | `src/core/grid.ts` — ver seção 2.2 |
 | T-102 Tela de corrida Phaser | ✅ **Feito nesta sessão** | `src/view/` — ver seção 2.3 |
@@ -53,7 +53,7 @@
 1. `cursorGraphics` (o indicador da barra de timing) era adicionado como filho de `panel`, que é destruído inteiro (`removeAll(true)`) a cada troca de fase — no 2º desafio da corrida, a corrida travava com `TypeError: Cannot read properties of undefined (reading 'sys')` ao tentar reusar o objeto já destruído. Corrigido criando um `Graphics` novo por desafio.
 2. O HUD não era atualizado ao sair do overlay de DNF — depois de um revive, a tela mostrava "Saúde: 0/100" em vez de "50/100" até a próxima animação. Corrigido centralizando `updateHud()` no topo de `startEventCycle()`.
 
-**Não verificado visualmente** (custo proibitivo de cliques automatizados pra chegar lá numa corrida de 145 eventos): a tela do evento de pit (volta 4) e o resumo por chegada natural (sem DNF). Ambos usam exatamente os mesmos caminhos de código já exercitados (branch `isPit` em `computeScale`/`resolveCurrent`; branch `!output.dnf` em `showSummary`), risco avaliado como baixo, mas fica registrado como verificação pendente pro próximo playtest humano (T-109/T-110).
+**Atualização — verificação de pit/resumo natural fechada nesta 2ª metade da sessão:** rodei uma corrida inteira automatizada (145 eventos, ~145 cliques) até o fim. Isso encontrou um **3º bug real**: `updateHud()` e `updateIconPositions()` chamavam `currentEvent(state)`, que retorna `undefined` quando a corrida termina (`eventIndex >= events.length`) — o acesso a `.kind` daí lançava `TypeError` e travava a corrida bem no finalzinho (nunca mostrava o resumo). Corrigido: `updateHud()` mostra "Corrida encerrada" quando `finished`; `updateIconPositions()` usa o último evento da sequência como referência de posição nesse caso. Reconfirmado depois: corrida completa até a bandeira quadriculada, resumo certo ("Posição 8/12, Voltas completadas 8/8, Chegou à bandeira quadriculada"), sem erros. O evento de pit também foi atravessado sem problema (volta 4→5 sem travar).
 
 ### 2.4 T-107 — Balance pass, rodada 1
 
@@ -67,6 +67,20 @@ Ver seção 4 (achados anteriores) e seção 5 (o que mudou). Resultado final (5
 | Temerário | 5.59 | 0.2% | 0.0% | 0.0% |
 
 Bate com todas as metas da seção 5 do Claude-Tech.md: Médio entre 4º-7º ✅, DNF do Médio <15% ✅ (na verdade 0%), Skilled vence 30–40% ✅ (31.4%), Casual completa ≥70% das tentativas ✅ (98%). DNF não reabriu em nenhum perfil.
+
+### 2.5 T-005 — Telemetria (PostHog + modo offline)
+
+- `src/telemetry/analytics.ts`: wrapper com sink plugável (`configureAnalytics`/`track`). Sem `VITE_POSTHOG_KEY`, fica no `consoleSink` (modo offline). Zero dependência de Node — seguro pra bundlar no navegador.
+- `src/telemetry/fileSink.ts`: modo offline em arquivo, **Node-only** (pro harness de bots usar no futuro) — deliberadamente separado do wrapper do navegador, porque `node:fs` quebraria o bundle do Vite se importado de `src/view/`.
+- `.env.example` versionado (template); `.env` real gitignorado, com o token do Claude-Tech.md §3 preenchido.
+- Ligados como prova de conceito: `session_start`/`session_end` (`main.ts`) e `race_start`/`race_end` (`RaceScene.ts`). **Deliberadamente não liguei** `challenge_result`, `boost_chosen`, `overtake`, `dnf`, `revive_decision` nem a tela de nota 1–5 — isso é escopo do T-108, não pedido nesta sessão.
+- Só Product Analytics fica ligado no client (`capture_pageview`, `autocapture`, `disable_session_recording`, `capture_performance` todos desligados no `posthog.init()`), coerente com a decisão já registrada no Claude-Tech.md §3 de deixar os outros produtos do PostHog de fora por ora.
+- **Verificação:** meus próprios testes automatizados (Playwright headless) deram falso negativo — não consegui ver a requisição de captura na rede, mesmo confirmando que (a) o token/host estavam corretos, (b) o SDK inicializava sem erro, (c) a rede alcançava a API do PostHog (testei com uma chamada HTTP direta, fora do browser). Investiguei bastante sem achar a causa exata; provavelmente uma particularidade do Chromium headless de sessão curta, não um bug no código. **O PO confirmou ao vivo no painel do PostHog** (`session_start`, `session_end`, `race_start` aparecendo na aba Activity, com timestamps reais de uma sessão jogada manualmente) — a integração funciona de verdade, só a minha verificação automatizada que não prestava pra esse caso específico.
+- 5 testes novos (`tests/analytics.test.ts`, `tests/fileSink.test.ts`).
+
+### 2.6 Traçado de Spa redesenhado (feedback do PO)
+
+O traçado da T-003 (seção 2.1) era só "topologicamente plausível" — uma curva genérica, sem nenhuma tentativa séria de parecer com o circuito real. O PO notou que isso compromete o sentido de testar com um usuário normal (ninguém reconhece Spa-Francorchamps num blob arredondado). Redesenhado com a geometria real do circuito: La Source como hairpin apertado logo após a largada, a reta de Kemmel longa e reta (o trecho mais reconhecível do circuito de verdade, entre Eau Rouge/Raidillon e Les Combes), setor central sinuoso (Bruxelles/Rivage → Pouhon → Fagnes) e um retorno longo por Stavelot → Blanchimont até o Bus Stop. Coordenadas reescalonadas pra usar melhor o quadro 0..1 do desenho. Verificado visualmente no debug (T-003) e na view real do jogo — a silhueta agora é reconhecível.
 
 ## 3. Pendências / decisões ambíguas registradas nesta sessão
 
@@ -110,18 +124,19 @@ Essa é uma mudança de arquitetura no core (`raceState.ts`), não só um ajuste
 ## 6. Próximos passos (retomar na próxima sessão)
 
 1. **T-006 (bloqueada):** aguardando o PO criar conta Vercel/Netlify/GitHub Pages.
-2. **T-005:** integrar `analytics.ts` (conta PostHog já existe, credenciais em Claude-Tech.md).
+2. **T-108:** integrar o restante dos eventos v1 (`challenge_result`, `boost_chosen`, `overtake`, `dnf`, `revive_decision`) + tela de nota 1–5 no resumo.
 3. **T-105/T-106:** feel pass (benchmark CSR2, juice) — precisa de playtest humano, não dá pra fazer 100% autônomo.
-4. **T-108:** telemetria nos eventos de corrida (depende da T-005).
-5. **Verificação visual pendente** (seção 2.3): evento de pit e resumo por chegada natural — conferir no próximo playtest ou com uma sessão de teste automatizado mais longa.
-6. **Reavaliar `OVERTAKE_GAP_THRESHOLD`** contra a nova escala de `gapToAhead` num playtest humano (seção 5).
-7. Se o Manager (M2) for consumir `RaceOutput.position`, revisitar a divergência entre posição do core e posição do grid (seção 3).
+4. **Reavaliar `OVERTAKE_GAP_THRESHOLD`** contra a nova escala de `gapToAhead` num playtest humano (seção 5).
+5. Se o Manager (M2) for consumir `RaceOutput.position`, revisitar a divergência entre posição do core e posição do grid (seção 3).
+6. Curadoria de pontos do traçado (seção 2.6) é uma aproximação de memória, não um traçado GPS real — se algum tester reconhecer alguma curva fora de posição, vale ajuste fino.
 
 ## 7. Como rodar
 
 ```
 npm install
-npm test        # 33 testes devem passar
+npm test        # 37 testes devem passar
 npm run bots     # relatório de balanceamento (ver seção 2.4)
 npm run dev      # abre http://localhost:5173/index.html (jogo) e /track-debug.html (debug do traçado)
 ```
+
+Telemetria real (PostHog) precisa de um `.env` com `VITE_POSTHOG_KEY` (ver `.env.example`; token no Claude-Tech.md §3). Sem isso, fica em modo offline (console).
