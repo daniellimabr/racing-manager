@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<title>HUD C — Broadcast/telemetria F1</title>
+<style>body{margin:0;background:#0a0a0a;display:flex;justify-content:center;padding:16px 0;}canvas{background:#1a1a1a;}</style>
+</head>
+<body>
+<canvas id="c" width="480" height="800"></canvas>
+<script>
+const ctx = document.getElementById('c').getContext('2d');
+const W = 480, H = 800;
+
+function drawTrackPlaceholder() {
+  ctx.fillStyle = '#1a1a1a';
+  ctx.fillRect(0, 0, W, H);
+  const cx = W / 2, cy = H / 2 + 10, rx = 200, ry = 330;
+  ctx.strokeStyle = '#3a3a3a';
+  ctx.lineWidth = 26;
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.strokeStyle = '#555';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([6, 8]);
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  const cars = [
+    { angle: -1.4, r: 12, color: '#ffdd33', ring: false },
+    { angle: -1.1, r: 9, color: '#7788ff', ring: true },
+    { angle: -0.7, r: 8, color: '#cc66ff', ring: true },
+    { angle: 0.4, r: 5, color: '#999', ring: false },
+    { angle: 1.2, r: 5, color: '#999', ring: false },
+    { angle: 2.1, r: 5, color: '#999', ring: false },
+  ];
+  for (const c of cars) {
+    const x = cx + Math.cos(c.angle) * rx;
+    const y = cy + Math.sin(c.angle) * ry;
+    if (c.ring) {
+      ctx.beginPath();
+      ctx.arc(x, y, c.r + 4, 0, Math.PI * 2);
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.arc(x, y, c.r, 0, Math.PI * 2);
+    ctx.fillStyle = c.color;
+    ctx.fill();
+  }
+}
+
+function drawHud() {
+  // barra 1: posição + progresso de volta + gap, translúcida sobre a pista
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(0, 0, W, 46);
+
+  // plaqueta de posição (cor de equipe)
+  ctx.fillStyle = '#ffdd33';
+  ctx.fillRect(8, 8, 56, 30);
+  ctx.fillStyle = '#111';
+  ctx.font = 'bold 18px system-ui';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('P3', 36, 24);
+
+  // progresso da volta (linha fina + marcadores de curva + ponto atual)
+  const lineX0 = 90, lineX1 = W - 110, lineY = 23;
+  ctx.strokeStyle = '#555';
+  ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(lineX0, lineY); ctx.lineTo(lineX1, lineY); ctx.stroke();
+  const corners = [0.08, 0.22, 0.38, 0.5, 0.63, 0.74, 0.85, 0.93];
+  ctx.fillStyle = '#888';
+  for (const t of corners) {
+    const x = lineX0 + t * (lineX1 - lineX0);
+    ctx.fillRect(x - 1, lineY - 5, 2, 10);
+  }
+  const progress = 0.46;
+  const px = lineX0 + progress * (lineX1 - lineX0);
+  ctx.beginPath();
+  ctx.arc(px, lineY, 6, 0, Math.PI * 2);
+  ctx.fillStyle = '#ffdd33';
+  ctx.fill();
+  ctx.font = '9px system-ui';
+  ctx.fillStyle = '#aaa';
+  ctx.textAlign = 'center';
+  ctx.fillText('VOLTA 5/8', (lineX0 + lineX1) / 2, 40);
+
+  // gap estilo telemetria (monospace)
+  const gap = 0.482;
+  ctx.textAlign = 'right';
+  ctx.font = 'bold 18px monospace';
+  ctx.fillStyle = gap > 0 ? '#e74c3c' : '#2ecc71';
+  ctx.fillText((gap > 0 ? '+' : '') + gap.toFixed(3), W - 10, 28);
+
+  // barra 2: saude + nitro, estilo telemetria de pneu/combustivel
+  ctx.fillStyle = 'rgba(15,15,18,0.6)';
+  ctx.fillRect(0, 46, W, 34);
+
+  ctx.font = '10px monospace';
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#999';
+  ctx.fillText('SAÚDE', 10, 68);
+  const hpSegs = 10, hpFilled = Math.round((72 / 180) * hpSegs);
+  for (let i = 0; i < hpSegs; i++) {
+    const x = 60 + i * 14;
+    ctx.fillStyle = i < hpFilled ? (i < hpSegs * 0.5 ? '#2ecc71' : i < hpSegs * 0.75 ? '#f1c40f' : '#e74c3c') : '#2a2a2a';
+    ctx.fillRect(x, 58, 11, 12);
+  }
+
+  ctx.textAlign = 'right';
+  ctx.fillStyle = '#999';
+  ctx.fillText('NITRO', W - 150, 68);
+  const nitroPct = 2 / 3;
+  ctx.fillStyle = '#2a2a2a';
+  ctx.fillRect(W - 140, 58, 130, 12);
+  ctx.fillStyle = '#64b5f6';
+  ctx.fillRect(W - 140, 58, 130 * nitroPct, 12);
+  ctx.strokeStyle = '#456';
+  ctx.strokeRect(W - 140, 58, 130, 12);
+  ctx.fillStyle = '#fff';
+  ctx.font = '9px monospace';
+  ctx.fillText('2/3', W - 10, 68);
+}
+
+drawTrackPlaceholder();
+drawHud();
+</script>
+</body>
+</html>

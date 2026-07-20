@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<title>HUD A — Texto refinado</title>
+<style>body{margin:0;background:#0a0a0a;display:flex;justify-content:center;padding:16px 0;}canvas{background:#1a1a1a;}</style>
+</head>
+<body>
+<canvas id="c" width="480" height="800"></canvas>
+<script>
+const ctx = document.getElementById('c').getContext('2d');
+const W = 480, H = 800;
+const HUD_H = 78;
+
+function drawTrackPlaceholder(topY) {
+  ctx.fillStyle = '#1a1a1a';
+  ctx.fillRect(0, 0, W, H);
+  const cx = W / 2, cy = topY + (H - topY) / 2, rx = 190, ry = (H - topY) / 2 - 36;
+  ctx.strokeStyle = '#3a3a3a';
+  ctx.lineWidth = 26;
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.strokeStyle = '#555';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([6, 8]);
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  const cars = [
+    { angle: -1.4, r: 12, color: '#ffdd33', ring: false, label: 'P1(você)' },
+    { angle: -1.1, r: 9, color: '#7788ff', ring: true, label: 'P2(dupla)' },
+    { angle: -0.7, r: 8, color: '#cc66ff', ring: true, label: 'P3' },
+    { angle: 0.4, r: 5, color: '#999', ring: false },
+    { angle: 1.2, r: 5, color: '#999', ring: false },
+    { angle: 2.1, r: 5, color: '#999', ring: false },
+  ];
+  for (const c of cars) {
+    const x = cx + Math.cos(c.angle) * rx;
+    const y = cy + Math.sin(c.angle) * ry;
+    if (c.ring) {
+      ctx.beginPath();
+      ctx.arc(x, y, c.r + 4, 0, Math.PI * 2);
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.arc(x, y, c.r, 0, Math.PI * 2);
+    ctx.fillStyle = c.color;
+    ctx.fill();
+  }
+}
+
+function drawHud() {
+  ctx.fillStyle = '#202225';
+  ctx.fillRect(0, 0, W, HUD_H);
+  ctx.strokeStyle = '#000';
+  ctx.beginPath(); ctx.moveTo(0, HUD_H); ctx.lineTo(W, HUD_H); ctx.stroke();
+
+  // posição grande + volta
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 30px system-ui';
+  ctx.textAlign = 'left';
+  ctx.fillText('P3', 16, 42);
+
+  ctx.font = '10px system-ui';
+  ctx.fillStyle = '#999';
+  ctx.fillText('VOLTA', 72, 20);
+  ctx.font = 'bold 16px system-ui';
+  ctx.fillStyle = '#fff';
+  ctx.fillText('5/8', 72, 38);
+
+  // gap grande, cor por sinal (positivo = atrás = ruim = vermelho)
+  const gap = 0.482;
+  ctx.textAlign = 'right';
+  ctx.font = 'bold 22px system-ui';
+  ctx.fillStyle = gap > 0 ? '#e74c3c' : '#2ecc71';
+  ctx.fillText((gap > 0 ? '+' : '') + gap.toFixed(3) + 's', W - 16, 34);
+  ctx.font = '11px system-ui';
+  ctx.fillStyle = '#889';
+  ctx.fillText('▼ diminuindo', W - 16, 50);
+
+  // barra de saude
+  const hpPct = 72 / 180;
+  const barX = 16, barY = 58, barW = 260, barH = 14;
+  ctx.fillStyle = '#333';
+  ctx.fillRect(barX, barY, barW, barH);
+  ctx.fillStyle = hpPct > 0.5 ? '#2ecc71' : hpPct > 0.25 ? '#f1c40f' : '#e74c3c';
+  ctx.fillRect(barX, barY, barW * hpPct, barH);
+  ctx.strokeStyle = '#555';
+  ctx.strokeRect(barX, barY, barW, barH);
+  ctx.font = '10px system-ui';
+  ctx.fillStyle = '#fff';
+  ctx.textAlign = 'left';
+  ctx.fillText('SAÚDE 72/180', barX + 4, barY + 11);
+
+  // nitro: 3 diamantes, 2 cheios
+  const nitroX = 290, nitroY = 65, charges = 2, total = 3;
+  for (let i = 0; i < total; i++) {
+    const x = nitroX + i * 20;
+    ctx.beginPath();
+    ctx.moveTo(x, nitroY - 8);
+    ctx.lineTo(x + 7, nitroY);
+    ctx.lineTo(x, nitroY + 8);
+    ctx.lineTo(x - 7, nitroY);
+    ctx.closePath();
+    ctx.fillStyle = i < charges ? '#64b5f6' : '#333';
+    ctx.fill();
+    ctx.strokeStyle = '#556';
+    ctx.stroke();
+  }
+
+  ctx.font = '11px system-ui';
+  ctx.fillStyle = '#889';
+  ctx.textAlign = 'right';
+  ctx.fillText('Curva 4 · Frenagem', W - 16, 74);
+}
+
+drawTrackPlaceholder(HUD_H);
+drawHud();
+</script>
+</body>
+</html>

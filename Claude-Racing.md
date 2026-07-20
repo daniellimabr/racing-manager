@@ -194,6 +194,18 @@ PO confirmou que o feel pass (T-106) já está bom o suficiente para avançar. C
 
 **Não executado ainda nesta sessão** — fica a critério do PO agendar as 3 sessões quando quiser. Recomendo esperar o deploy (T-006) fechar antes de rodar oficialmente, pra já testar no link real e não em `npm run dev`.
 
+### 2.12 Exploração de HUD — 3 mockups (sessão 3, antes da rodada autônoma de 2h)
+
+PO pediu pra considerar desenhar um mínimo de HUD pra tela de corrida. O HUD atual (`RaceScene.ts`, `updateHud()`) é 3 linhas de texto cru sobre um painel cinza — funcional, mas sem hierarquia visual. Gerei 3 propostas estáticas (ainda greybox, sem arte final) pra escolha de direção antes de qualquer implementação real:
+
+- `design/hud-mockups/hud-a-texto-refinado.html` (+ `.png`) — evolução mínima do atual: mesma lógica de texto, mas com posição em destaque, barra de saúde horizontal com cor por faixa, nitro como 3 losangos, gap colorido por sinal. Menor risco de implementação.
+- `design/hud-mockups/hud-b-cantos-mobile.html` (+ `.png`) — HUD dividida em 4 cantos, estilo jogo mobile arcade (badge circular de posição, saúde em blocos tipo "vidas", nitro em células). Mais familiar pra quem já joga jogos de corrida mobile, ocupa uma faixa fixa maior no topo.
+- `design/hud-mockups/hud-c-broadcast-f1.html` (+ `.png`) — estilo overlay de transmissão de F1: barras translúcidas sobrepostas à pista (não reservam uma faixa opaca fixa, economizam espaço vertical), progresso de volta como linha com marcadores de curva, saúde/nitro como barras de telemetria monoespaçadas.
+
+Cada `.html` é standalone (canvas puro, abre direto no navegador, mesmo padrão dos outros greybox da T-105) com um traçado placeholder (não é Spa de verdade, só pra dar contexto espacial) por trás — o ponto de comparação é só a área do HUD. Renderizado também em `.png` (via Playwright headless, mesmo processo, instalado/removido) pra visualização rápida sem precisar abrir nada.
+
+**Nenhuma escolhida/implementada ainda** — está registrado aqui só como ponto de partida; a decisão de qual direção seguir (ou nenhuma, ficar no atual) é do PO.
+
 ## 3. Pendências / decisões ambíguas registradas nesta sessão
 
 - **Boost: só 3 dos 8 conceitos do CLAUDE.md §6.1 estão implementados no core** (`pneu`/`freio`/`janela`; faltam nitro extra, rasante, reparo rápido, fôlego de ultrapassagem, recuperação de erro). Isso já era assim desde o T-002, não é uma regressão desta sessão — só nunca tinha sido registrado. A view oferece as 3 disponíveis a cada boost elegível. Decisão de qual conjunto priorizar pro M1 fica para o CTO/PO.
