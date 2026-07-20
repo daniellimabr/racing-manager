@@ -6,7 +6,7 @@ export { DEFAULT_CAR_SETUP } from '../core/constants.js';
 export const CANVAS_WIDTH = 480;
 export const CANVAS_HEIGHT = 800;
 
-export const HUD_HEIGHT = 60;
+export const HUD_HEIGHT = 78;
 export const PANEL_HEIGHT = 220;
 export const TRACK_RECT = {
   x: 10,

@@ -57,9 +57,21 @@ export class RaceScene extends Phaser.Scene {
   private playerCumulativeTime = 0;
 
   private trackGraphics!: Phaser.GameObjects.Graphics;
-  private hudText!: Phaser.GameObjects.Text;
   private icons = new Map<string, IconEntry>();
   private panel!: Phaser.GameObjects.Container;
+
+  // HUD (mockup A — texto refinado, ver design/hud-mockups/hud-a-texto-refinado.html)
+  private hudPositionText!: Phaser.GameObjects.Text;
+  private hudLapLabelText!: Phaser.GameObjects.Text;
+  private hudLapValueText!: Phaser.GameObjects.Text;
+  private hudGapText!: Phaser.GameObjects.Text;
+  private hudGapTrendText!: Phaser.GameObjects.Text;
+  private hudHealthBarBg!: Phaser.GameObjects.Rectangle;
+  private hudHealthBarFill!: Phaser.GameObjects.Rectangle;
+  private hudHealthLabelText!: Phaser.GameObjects.Text;
+  private hudNitroGraphics!: Phaser.GameObjects.Graphics;
+  private hudEventText!: Phaser.GameObjects.Text;
+  private hudLastGap: number | null = null;
 
   private challengeActive = false;
   private challengeStartTime = 0;
@@ -102,8 +114,7 @@ export class RaceScene extends Phaser.Scene {
     this.raceEnded = false;
     trackEvent('race_start', { trackId: track.id });
 
-    this.add.rectangle(0, 0, CANVAS_WIDTH, HUD_HEIGHT, 0x222222).setOrigin(0, 0);
-    this.hudText = this.add.text(10, 8, '', { fontSize: '14px', color: '#eeeeee', lineSpacing: 4 });
+    this.buildHud();
 
     this.trackGraphics = this.add.graphics();
     this.drawTrack();
@@ -256,6 +267,37 @@ export class RaceScene extends Phaser.Scene {
     this.updateHud();
   }
 
+  /** Monta os elementos estáticos do HUD (mockup A) uma única vez; updateHud() só atualiza valores. */
+  private buildHud(): void {
+    this.add.rectangle(0, 0, CANVAS_WIDTH, HUD_HEIGHT, 0x202225).setOrigin(0, 0);
+    this.add.rectangle(0, HUD_HEIGHT - 1, CANVAS_WIDTH, 1, 0x000000).setOrigin(0, 0);
+
+    this.hudPositionText = this.add.text(16, 8, '', {
+      fontSize: '26px', color: '#ffffff', fontStyle: 'bold',
+    });
+
+    this.hudLapLabelText = this.add.text(76, 8, 'VOLTA', { fontSize: '10px', color: '#999999' });
+    this.hudLapValueText = this.add.text(76, 20, '', { fontSize: '15px', color: '#ffffff', fontStyle: 'bold' });
+
+    this.hudGapText = this.add.text(CANVAS_WIDTH - 16, 6, '', {
+      fontSize: '20px', color: '#e74c3c', fontStyle: 'bold',
+    }).setOrigin(1, 0);
+    this.hudGapTrendText = this.add.text(CANVAS_WIDTH - 16, 28, '', {
+      fontSize: '10px', color: '#8899aa',
+    }).setOrigin(1, 0);
+
+    const barX = 16, barY = 46, barW = 260, barH = 14;
+    this.hudHealthBarBg = this.add.rectangle(barX, barY, barW, barH, 0x333333).setOrigin(0, 0).setStrokeStyle(1, 0x555555);
+    this.hudHealthBarFill = this.add.rectangle(barX, barY, barW, barH, 0x2ecc71).setOrigin(0, 0);
+    this.hudHealthLabelText = this.add.text(barX + 4, barY + 2, '', { fontSize: '10px', color: '#ffffff' });
+
+    this.hudNitroGraphics = this.add.graphics();
+
+    this.hudEventText = this.add.text(CANVAS_WIDTH - 16, 64, '', {
+      fontSize: '10px', color: '#8899aa',
+    }).setOrigin(1, 0);
+  }
+
   private updateHud(): void {
     const s = this.raceState;
     const standings = this.currentStandings();
@@ -263,12 +305,43 @@ export class RaceScene extends Phaser.Scene {
     const ev = s.finished ? undefined : currentEvent(s);
     const eventLabel = !ev ? 'Corrida encerrada' : ev.kind === 'pit' ? 'Pit stop' : `${ev.cornerName ?? ''} (${ev.kind})`;
     const gap = this.displayGap(standings, playerStanding);
-    const lines = [
-      `Posição: ${playerStanding.position}/12   Volta: ${s.lap}/${track.laps}`,
-      `Saúde: ${s.health}/${s.healthMax}   Nitro: ${s.nitro}`,
-      `Gap: ${formatGap(gap)}   ${eventLabel}`,
-    ];
-    this.hudText.setText(lines.join('\n'));
+
+    this.hudPositionText.setText(`P${playerStanding.position}`);
+    this.hudLapValueText.setText(`${s.lap}/${track.laps}`);
+
+    this.hudGapText.setText(formatGap(gap)).setColor(gap > 0 ? '#e74c3c' : '#2ecc71');
+    if (this.hudLastGap !== null && gap !== this.hudLastGap) {
+      this.hudGapTrendText.setText(gap < this.hudLastGap ? '▼ diminuindo' : '▲ aumentando');
+    }
+    this.hudLastGap = gap;
+
+    const hpPct = s.healthMax > 0 ? Math.max(0, s.health / s.healthMax) : 0;
+    this.hudHealthBarFill.width = 260 * hpPct;
+    this.hudHealthBarFill.setFillStyle(hpPct > 0.5 ? 0x2ecc71 : hpPct > 0.25 ? 0xf1c40f : 0xe74c3c);
+    this.hudHealthLabelText.setText(`SAÚDE ${s.health}/${s.healthMax}`);
+
+    this.drawHudNitro(s.nitro, this.carSetup.nitroCharges);
+
+    this.hudEventText.setText(eventLabel);
+  }
+
+  private drawHudNitro(charges: number, total: number): void {
+    const g = this.hudNitroGraphics;
+    g.clear();
+    const startX = 290, y = 53, spacing = 20, r = 7;
+    for (let i = 0; i < total; i++) {
+      const x = startX + i * spacing;
+      g.fillStyle(i < charges ? 0x64b5f6 : 0x333333, 1);
+      g.lineStyle(1, 0x556677, 1);
+      g.beginPath();
+      g.moveTo(x, y - r);
+      g.lineTo(x + r, y);
+      g.lineTo(x, y + r);
+      g.lineTo(x - r, y);
+      g.closePath();
+      g.fillPath();
+      g.strokePath();
+    }
   }
 
   /**
