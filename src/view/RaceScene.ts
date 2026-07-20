@@ -262,12 +262,27 @@ export class RaceScene extends Phaser.Scene {
     const playerStanding = standings.find((x) => x.isPlayer)!;
     const ev = s.finished ? undefined : currentEvent(s);
     const eventLabel = !ev ? 'Corrida encerrada' : ev.kind === 'pit' ? 'Pit stop' : `${ev.cornerName ?? ''} (${ev.kind})`;
+    const gap = this.displayGap(standings, playerStanding);
     const lines = [
       `Posição: ${playerStanding.position}/12   Volta: ${s.lap}/${track.laps}`,
       `Saúde: ${s.health}/${s.healthMax}   Nitro: ${s.nitro}`,
-      `Gap: ${formatGap(s.gapToAhead)}   ${eventLabel}`,
+      `Gap: ${formatGap(gap)}   ${eventLabel}`,
     ];
     this.hudText.setText(lines.join('\n'));
+  }
+
+  /**
+   * Gap exibido no HUD. Quando o jogador é 1º no grid, `raceState.gapToAhead`
+   * (do core, modelo 1D de "carro da frente") é só uma constante — não existe
+   * "carro da frente" pra quem lidera. Nesse caso, usa a distância real até o
+   * 2º colocado do grid (que já simula os 12 carros de verdade). Nos demais
+   * casos, mantém o gap do core (usado também pra decidir a ultrapassagem —
+   * ver divergência core/grid registrada em Claude-Racing.md §3).
+   */
+  private displayGap(standings: GridStanding[], playerStanding: GridStanding): number {
+    if (playerStanding.position !== 1) return this.raceState.gapToAhead;
+    const second = standings.find((x) => x.position === 2);
+    return second ? -second.gapToLeader : this.raceState.gapToAhead;
   }
 
   // ---------- painel inferior (decisões) ----------
