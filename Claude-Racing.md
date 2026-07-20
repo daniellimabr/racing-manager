@@ -2,7 +2,7 @@
 
 > Documento vivo mantido pelo agente TechLead-Racing (ver protocolo em Claude-Tech.md, seção 1.1).
 > Anexar junto com CLAUDE.md e Claude-Tech.md em conversas sobre a trilha Racing.
-> Última atualização: 2026-07-20 (sessão 3, continuação — T-105 implementado de verdade no core/view (não só a demo), balanceamento recalibrado (T-107 rodada 2), PO escolheu o mockup A de HUD (ainda não implementado), deploy continua bloqueado)
+> Última atualização: 2026-07-20 (sessão 3, encerramento — T-105 implementado de verdade no core/view, balanceamento recalibrado (T-107 rodada 2), PO escolheu o mockup A de HUD (ainda não implementado), deploy fechado e publicado com tudo desta sessão, GCM configurado para push futuro sem precisar pedir token de novo)
 
 ## 1. Status do backlog
 
@@ -13,7 +13,7 @@
 | T-003 Pista como dado + render de debug | ✅ **Feito nesta sessão** | schema ganhou `path`/`pitPathIndex`/`pathIndex` (faltava na sessão 1); `track-debug.html` — ver seção 2.1 |
 | T-004 Harness de bots | ✅ Feito | (sessão 1); estendido nesta sessão com métricas de vitória/pódio |
 | T-005 Telemetria (PostHog) | ✅ **Feito nesta sessão** | Wrapper + modo offline + `session_start`/`session_end`/`race_start`/`race_end` — ver seção 2.5 |
-| T-006 Deploy contínuo | ⏳ **Ainda bloqueado — mesmo outage, confirmado de novo na sessão 3** | Setup correto, nada de código pendente. Reconfirmado no início da sessão 3 (2026-07-20 ~01:46 UTC): site ainda 404, componente Actions do GitHub em `partial_outage` (junto com API Requests e Issues), há uma run manual presa em `queued` desde 01:16 UTC. Ver seção 2.7 |
+| T-006 Deploy contínuo | ✅ **Fechado nesta sessão** | Run 29738392933 completou com `success` às 2026-07-20 11:24 UTC — `https://daniellimabr.github.io/racing-manager/` já não retorna 404; confirmado o bundle JS real carregando (200, ~1,4 MB). Ver seção 2.7 |
 | T-101 Simulação de grid (12 carros) | ✅ **Feito nesta sessão** | `src/core/grid.ts` — ver seção 2.2 |
 | T-102 Tela de corrida Phaser | ✅ **Feito nesta sessão** | `src/view/` — ver seção 2.3 |
 | T-103 Fluxo completo integrado | ✅ **Feito nesta sessão** | Idem |
@@ -99,7 +99,12 @@ Verificado visualmente no debug (T-003) e na view real do jogo em ambas as rodad
 - **Autenticação do push:** não guardei nenhuma credencial neste ambiente (sem credential helper configurado). O PO gerou 2 tokens fine-grained de curta duração (repo `racing-manager`, permissões Contents + Workflows em "Read and write") e colou no chat pra eu usar só no comando do push — nunca gravados em `.git/config` nem em nenhum arquivo (usados só inline no argumento do comando). Os fine-grained tokens do GitHub exigem a permissão "Workflows" separada de "Contents" pra aceitar mudanças em `.github/workflows/` — na 1ª tentativa faltou essa permissão, corrigido gerando outro token já com as duas.
 - Build de produção verificado localmente antes do push (`npm run build`, ~365 KB gzip no bundle principal — a maior parte é o Phaser; aviso de chunk grande do Vite, não bloqueia nada agora mas vale revisitar se afetar o load em 4G).
 - 1ª run do workflow falhou com `startup_failure` — aconteceu antes do PO trocar a fonte do Pages pra "Actions", não é um problema no workflow em si.
-- **Status ao encerrar esta sessão: deploy ainda não completou.** Depois da troca de fonte do Pages, mais 2 tentativas (push automático + disparo manual via `workflow_dispatch`) falharam com a mesma mensagem genérica do GitHub ("An unexpected error has occurred... Errors are sometimes temporary"). Confirmado via `githubstatus.com` que o componente **Actions estava em "partial outage"** no momento (2026-07-20, ~00:49 UTC) — não é problema de configuração do repo nem do workflow. **Próximo passo, sem precisar de mim:** quando o Actions do GitHub voltar ao normal, o PO clica em "Re-run all jobs" na run mais recente (ou "Run workflow" de novo) e deve completar. Não requer nenhuma mudança de código.
+- **Status ao encerrar a sessão 2: deploy ainda não tinha completado**, bloqueado pelo outage do GitHub Actions (seção histórica preservada abaixo).
+- **Fechado de fato na sessão 3, em 2 etapas:**
+  1. **~11:24 UTC:** a run que estava presa em `queued` desde a sessão 2 (commit `1dc9b08`, o traçado de Spa corrigido) finalmente completou sozinha (`success`) — confirmação de que era mesmo só o outage, sem nada de configuração errada. Nesse ponto o site publicado ainda **não** tinha nenhuma mudança da sessão 3 (T-105 real, balanceamento, HUD mockups, fix do gap) — só o snapshot da sessão 2, porque eu não tinha token de push nesta sessão até então.
+  2. **~15:22 UTC:** o PO gerou um token fine-grained novo e pediu pra eu fazer o push de verdade dos 7 commits acumulados da sessão 3. **Duas tentativas minhas de configurar a credencial/fazer o push foram bloqueadas pelo classificador de permissão automático do Claude Code** (ação de "lidar com credencial" + "push pra repositório remoto" — bloqueio da ferramenta, não meu). Segui a orientação da própria ferramenta: parei, expliquei pro PO o que eu tentava fazer e por quê, e ofereci os comandos pra ele rodar direto no terminal dele (fora do meu sandbox, sem esse bloqueio). PO rodou com sucesso: `git config --global credential.helper manager` + `git credential approve` + `git push origin main` (`1dc9b08..4c92e3d`). O push disparou o workflow automaticamente, que completou com `success`; confirmei o novo hash do bundle (`main-JPVsUQZq.js`) servindo no link publicado.
+- **Token agora persiste no Git Credential Manager (Windows), não em nenhum arquivo do projeto nem em memória do agente.** Sessões futuras não devem precisar pedir token de novo pra dar `git push` neste mesmo computador — só se o token for revogado/expirar (o PO indicou que este é não-expirável) ou o Windows/perfil do usuário mudar.
+- **Nota de segurança:** o token foi colado em texto puro no chat 2 vezes ao longo da sessão (antes de eu descobrir o bloqueio da ferramenta). Recomendei ao PO revogar e gerar um novo depois de confirmado que tudo funcionou — registrar aqui caso isso não tenha sido feito, pra não esquecer.
 
 ### 2.8 T-108 — Telemetria completa (eventos v1)
 
@@ -312,13 +317,15 @@ Essa é uma mudança de arquitetura no core (`raceState.ts`), não só um ajuste
 
 ## 6. Próximos passos (retomar na próxima sessão)
 
-1. **T-006 — concluir o deploy:** ainda bloqueado pelo mesmo outage do GitHub, reconfirmado de novo ao longo da sessão 3 (seção 2.7) — a run manual presa em `queued` desde 01:16 UTC ainda não avançou mesmo com o Actions marcado "operational" de novo; uma 4ª tentativa também deu `startup_failure`, sem nenhum job chegando a iniciar. Não precisa de mim — quando o PO puder, tentar "Re-run all jobs" de novo ou um novo push.
-2. **Jogar a implementação real do T-105** (seção 2.13) e confirmar se a sensação bate com a demo aprovada — a mecânica foi portada e verificada tecnicamente (testes, build, smoke test automatizado), mas ninguém jogou a versão de verdade com as mãos ainda.
+1. ~~**T-006 — concluir o deploy**~~ **— fechado nesta sessão** (seção 2.7). `https://daniellimabr.github.io/racing-manager/` está publicado com o código da sessão 3 inteira. Push futuro não deve pedir token de novo (GCM configurado, ver seção 2.7).
+2. **Jogar a implementação real do T-105** (seção 2.13) e confirmar se a sensação bate com a demo aprovada — a mecânica foi portada e verificada tecnicamente (testes, build, smoke test automatizado), mas ninguém jogou a versão de verdade com as mãos ainda. Agora já dá pra fazer isso no link publicado, não só local.
 3. **Implementar o mockup A de HUD** (seção 2.12) — PO já escolheu, só falta trocar o `updateHud()` atual pelo layout escolhido. Não entrou nesta rodada por escopo/tempo.
 4. **T-109/T-110 — executar o roteiro de playtest** (seção 2.11) com o PO + 2 irmãos, 3 sessões. Ainda mais importante agora: validar de perto os 3 desvios de balanceamento da seção 2.13 (Médio um pouco fácil demais, DNF quase inexistente, sensibilidade do `POSITION_UNIT_SECONDS`) com dado humano real antes de continuar ajustando às cegas.
-5. Se o Manager (M2) for consumir `RaceOutput.position`, revisitar a divergência entre posição do core e posição do grid (seção 3).
+5. Se o Manager (M2) for consumir `RaceOutput.position`, revisitar a divergência entre posição do core e posição do grid (seção 3) — confirmada em jogo real nesta sessão (gap/ultrapassagem incoerentes quando o grid já promove o jogador a 1º antes do core).
 6. Chunk do bundle principal está grande (~365 KB gzip, majoritariamente Phaser) — considerar code-splitting se o load em 4G virar problema real no playtest.
 7. **Traçado de Spa (seção 2.6):** corrigido na sessão 2 com base num mapa real, mas ainda vale conferência humana — a curadoria de onde exatamente cada desafio "pega" no traçado é aproximada.
+8. **Decisão de design pendente de implementação:** roxo também desgastar a saúde do carro (seção 2.14) — timing de implementação é do CTO, não implementado ainda.
+9. **Segurança:** confirmar com o PO se o token de push (colado em texto puro no chat 2x nesta sessão) foi revogado/rotacionado depois de tudo validado.
 
 ## 7. Como rodar
 
@@ -333,6 +340,8 @@ npm run dev      # jogo local
 
 Telemetria real (PostHog) precisa de um `.env` com `VITE_POSTHOG_KEY` (ver `.env.example`; token no Claude-Tech.md §3). Sem isso, fica em modo offline (console).
 
-**Deploy publicado (quando o T-006 fechar de vez):** `https://daniellimabr.github.io/racing-manager/`
+**Deploy publicado (T-006 fechado):** `https://daniellimabr.github.io/racing-manager/` — atualizado automaticamente a cada push na `main` (workflow já configurado, sem passo manual).
+
+**Push para o GitHub:** `git push origin main` deve funcionar direto neste computador — o Git Credential Manager já está configurado e com o token do PO armazenado (Windows Credential Manager), não precisa passar token de novo. Se um agente tentar configurar isso do zero numa sessão nova e for bloqueado pelo classificador de permissão do Claude Code (aconteceu na sessão 3 — ver seção 2.7), não insistir: parar e passar os comandos pro PO rodar direto no terminal dele.
 
 **Demo greybox da proposta CSR2 (T-105, seção 2.10):** abrir `greybox-timing-csr2.html` direto no navegador (duplo clique) ou via `npm run dev` — não depende de build, é HTML/JS puro isolado do jogo de verdade.
