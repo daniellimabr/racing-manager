@@ -2,7 +2,7 @@
 
 > Documento vivo mantido pelo agente TechLead-Racing (ver protocolo em Claude-Tech.md, seção 1.1).
 > Anexar junto com CLAUDE.md e Claude-Tech.md em conversas sobre a trilha Racing.
-> Última atualização: 2026-07-20 (sessão 3, encerramento — T-105 implementado de verdade no core/view, balanceamento recalibrado (T-107 rodada 2), PO escolheu o mockup A de HUD (ainda não implementado), deploy fechado e publicado com tudo desta sessão, `git push` funcionando direto do sandbox do agente — ver seção 2.7)
+> Última atualização: 2026-07-20 (sessão 4, em andamento — PO confirmou em jogo real que o T-105 implementado ficou bom (sem ajustes); mockup A de HUD implementado/testado/commitado/publicado (ver seção 2.15); investigando prompt de permissão repetido nesta sessão Windows/PowerShell/VSCode-extension, PO vai reiniciar a janela do VS Code pra testar — ver seção 2.16)
 
 ## 1. Status do backlog
 
@@ -23,6 +23,7 @@
 | T-106 (juice) | ✅ **Feito nesta sessão (parte mecânica)** | Contagem 3-2-1, SFX sintetizado, vibração, flash/shake — ver seção 2.9. Falta o "teste cego com/sem juice" (T-106 é sobre percepção humana, não dá pra validar sozinho) |
 | T-107 Balance pass | ✅ **Rodada 1 feita nesta sessão** | Ver seção 2.4 — **nota:** era a 1ª rodada de verdade, não a 2ª (ver seção 5) |
 | T-108 Telemetria completa | ✅ **Feito nesta sessão** | Ver seção 2.8 |
+| HUD mockup A (escolhido sessão 3) | ✅ **Feito na sessão 4** | `updateHud()` reescrito conforme o mockup A; commit `f7a086a`, publicado. Ver seção 2.15 |
 
 **Como rodar:** `npm install && npm test && npm run bots && npm run dev` (abre em `/index.html`; `/track-debug.html` é só o debug isolado da T-003).
 
@@ -256,6 +257,34 @@ Recalibrei o único parâmetro de posição do modelo (`POSITION_UNIT_SECONDS`, 
 | Temerário | 4.84 | 0.0% | 0.0% | 0.0% |
 
 Skilled voltou pra dentro da meta (30–40%). **Mas isso não ficou perfeito — 2 desvios registrados como pendência na seção 3:** o Médio ficou um pouco melhor que a meta original (pos. média 3,67, meta era 4º–7º) e o DNF caiu a **quase zero em todos os perfis** (a mesma regressão à média que ajuda o Skilled também esvazia boa parte do risco de dano da frenagem). Não forcei um 2º parâmetro pra caçar um ajuste "perfeito" porque o modelo se mostrou **muito sensível** nessa faixa (Skilled foi de 99% pra 1% de vitórias variando `POSITION_UNIT_SECONDS` só de 3,7 pra 4,6) — sem dado de playtest humano real, continuar ajustando às cegas seria só adivinhação com mais decimais.
+
+### 2.15 T-105 — feedback do PO na implementação real (sessão 4) + T-105.5 HUD mockup A implementado
+
+**Feedback do T-105 real:** o PO jogou a implementação de verdade (não a demo greybox) e confirmou que a sensação bateu com a demo v2 aprovada (seção 2.10.1/2.13) — sem pedido de ajuste na mecânica de largada/frenagem/aceleração. Item do próximo-passos §6.2 fechado, nenhuma mudança de código motivada por isso.
+
+**HUD — mockup A implementado** (PO já tinha escolhido na sessão 3, seção 2.12; só faltava trocar o `updateHud()`):
+
+- `src/view/viewConstants.ts`: `HUD_HEIGHT` 60→78 (o mockup foi desenhado pro mesmo canvas 480×800 já em uso, então o layout bateu sem precisar redimensionar mais nada).
+- `src/view/RaceScene.ts`: `updateHud()` de 3 linhas de texto cru virou um HUD com hierarquia visual — posição grande em destaque, "VOLTA n/N", gap colorido por sinal (vermelho se atrás, verde se à frente) com indicador de tendência (▼/▲ comparando com o gap do frame anterior, campo novo `hudLastGap`), barra de saúde horizontal colorida por faixa (verde/amarelo/vermelho conforme %) com label sobreposto, nitro como losangos (preenchido = carga disponível, usa `carSetup.nitroCharges` como total), label do evento atual no canto inferior direito. Elementos construídos uma vez em `buildHud()` (novo método, chamado do `create()`), só os valores são atualizados a cada `updateHud()` — não recria objetos por frame.
+- **Verificado:** `npm test` (44/44), `npx tsc --noEmit` (limpo), `npm run build` (ok, ~367 KB gzip, mesmo aviso de chunk já conhecido). Smoke visual com Playwright headless (instalado/removido temporariamente, mesmo processo de sempre): tela inicial mostra corretamente "P7", "VOLTA 1/8", gap "+4,250s" em vermelho, barra de saúde cheia verde com label "SAÚDE 180/180", 3 losangos de nitro preenchidos em azul, "Largada (saída)" no rodapé — sem erros de console.
+- Commitado (`f7a086a`) e publicado (push direto do sandbox funcionou, ver seção 2.16 sobre o hiato de permissão que apareceu nesse meio-tempo).
+
+### 2.16 Investigação em andamento — prompt de permissão voltou a pedir aprovação a cada comando (sessão 4, Windows/PowerShell/VSCode extension)
+
+**Sintoma:** logo no início da sessão 4, todo comando de shell (não só `git push`) voltou a pedir aprovação do PO, apesar de `.claude/settings.local.json` já ter `"Bash(git push:*)"` liberado desde a sessão 3.
+
+**Causa raiz identificada (alta confiança):** essa sessão roda na ferramenta de shell **`PowerShell`** (ambiente Windows/VSCode extension), não `Bash` — as regras de permissão do Claude Code casam pelo **nome exato da ferramenta**. A regra `"Bash(git push:*)"` da sessão 3 (rodada em outro SO/ferramenta) simplesmente não se aplica aqui; não é revogação nem bug, é um `.md`/config específico de outra ferramenta de shell.
+
+**Correção tentada:** usei a skill `update-config` pra adicionar em paralelo `"PowerShell(git status/log/diff/add/commit/push:*)"` e `"PowerShell(npm test/build/bots:*)"` + `"PowerShell(npx tsc:*)"` no mesmo arquivo, preservando a entrada `Bash` antiga. JSON validado (`ConvertFrom-Json` sem erro).
+
+**Resultado — ainda não confirmado que funcionou:** os 2 comandos rodados logo depois (`git status`, depois `git push origin main`) executaram com sucesso, mas o **PO relatou que ambos pediram aprovação manual dele mesmo assim** — e o prompt **não oferecia opção de "sempre permitir"**, o que é atípico. Isso sugere que não é só um problema de sintaxe da regra (o formato usado é idêntico ao da regra `Bash` que já funcionava antes). Hipóteses registradas, nenhuma confirmada ainda:
+
+1. **Cache de settings**: mudança em `.claude/settings.local.json` pode só ser lida na abertura da sessão, igual ao caveat já documentado pra hooks (a skill `update-config` menciona isso explicitamente pra hooks; não está confirmado se vale pra permissions também).
+2. **Camada de permissão própria da extensão VSCode**: esta sessão roda "dentro de um ambiente de extensão nativa do VSCode" (contexto de sistema) — é possível que o prompt de aprovação que o PO vê venha de um mecanismo da extensão, não do `settings.local.json` puro, e que a ausência de "sempre permitir" seja um sintoma disso.
+
+**Não implementado/resolvido ainda.** Próxima ação combinada com o PO: ele vai **reiniciar a janela/sessão do VS Code** pra testar se a mudança passa a valer (testaria a hipótese 1). Se persistir mesmo depois do restart, a hipótese 2 fica mais provável e provavelmente precisa de investigação fora do escopo deste agente (configuração da extensão em si, não do repositório).
+
+**Se uma sessão futura (mesmo projeto) encontrar o mesmo sintoma:** primeiro confirmar qual ferramenta de shell está em uso (`Bash` vs `PowerShell`) e se as regras de `.claude/settings.local.json` cobrem essa ferramenta especificamente, antes de reinvestigar do zero.
 
 ### 2.14 Decisão de design (PO) — roxo também desgasta a saúde do carro
 
