@@ -2,7 +2,7 @@
 
 > Documento vivo mantido pelo agente TechLead-Racing (ver protocolo em Claude-Tech.md, seção 1.1).
 > Anexar junto com CLAUDE.md e Claude-Tech.md em conversas sobre a trilha Racing.
-> Última atualização: 2026-07-19 (sessão 2, 2ª metade — T-005 feita, verificação de pit/resumo natural fechada, 1 crash real corrigido, traçado de Spa redesenhado a pedido do PO)
+> Última atualização: 2026-07-19 (sessão 2, 3ª metade — T-006 desbloqueada e feita, T-108 feita, T-106/juice mecânico feito)
 
 ## 1. Status do backlog
 
@@ -12,15 +12,17 @@
 | T-002 Core extraído + testes | ✅ Feito | (sessão 1) |
 | T-003 Pista como dado + render de debug | ✅ **Feito nesta sessão** | schema ganhou `path`/`pitPathIndex`/`pathIndex` (faltava na sessão 1); `track-debug.html` — ver seção 2.1 |
 | T-004 Harness de bots | ✅ Feito | (sessão 1); estendido nesta sessão com métricas de vitória/pódio |
-| T-005 Telemetria (PostHog) | ✅ **Feito nesta sessão** | Wrapper + modo offline + `session_start`/`session_end`/`race_start`/`race_end` — ver seção 2.5. Restante dos eventos v1 é escopo do T-108 |
-| T-006 Deploy contínuo | 🚫 **Bloqueada** | Depende de conta Vercel/Netlify/GitHub Pages que só o PO pode criar — não tentada, conforme instrução |
+| T-005 Telemetria (PostHog) | ✅ **Feito nesta sessão** | Wrapper + modo offline + `session_start`/`session_end`/`race_start`/`race_end` — ver seção 2.5 |
+| T-006 Deploy contínuo | ✅ **Feito nesta sessão** | GitHub Pages via Actions — ver seção 2.7. PO criou o repo e liberou "Actions" como fonte do Pages |
 | T-101 Simulação de grid (12 carros) | ✅ **Feito nesta sessão** | `src/core/grid.ts` — ver seção 2.2 |
 | T-102 Tela de corrida Phaser | ✅ **Feito nesta sessão** | `src/view/` — ver seção 2.3 |
 | T-103 Fluxo completo integrado | ✅ **Feito nesta sessão** | Idem |
 | T-104 Animação entre eventos | ✅ **Feito nesta sessão** | Idem |
-| T-105 a T-106 (feel/juice) | ⏳ Não iniciado | Fora da ordem de prioridade desta sessão |
+| T-105 (benchmark CSR2) | ⏳ Bloqueada no PO | PO ainda não instalou o CSR2; parte mecânica adiantada via T-106 |
+| T-106 (juice) | ✅ **Feito nesta sessão (parte mecânica)** | Contagem 3-2-1, SFX sintetizado, vibração, flash/shake — ver seção 2.9. Falta o "teste cego com/sem juice" (T-106 é sobre percepção humana, não dá pra validar sozinho) |
 | T-107 Balance pass | ✅ **Rodada 1 feita nesta sessão** | Ver seção 2.4 — **nota:** era a 1ª rodada de verdade, não a 2ª (ver seção 5) |
-| T-108 a T-110 | ⏳ Não iniciado | Fora da ordem de prioridade desta sessão |
+| T-108 Telemetria completa | ✅ **Feito nesta sessão** | Ver seção 2.8 |
+| T-109 a T-110 | ⏳ Não iniciado | Precisam de playtest humano (Gate 1) |
 
 **Como rodar:** `npm install && npm test && npm run bots && npm run dev` (abre em `/index.html`; `/track-debug.html` é só o debug isolado da T-003).
 
@@ -82,6 +84,41 @@ Bate com todas as metas da seção 5 do Claude-Tech.md: Médio entre 4º-7º ✅
 
 O traçado da T-003 (seção 2.1) era só "topologicamente plausível" — uma curva genérica, sem nenhuma tentativa séria de parecer com o circuito real. O PO notou que isso compromete o sentido de testar com um usuário normal (ninguém reconhece Spa-Francorchamps num blob arredondado). Redesenhado com a geometria real do circuito: La Source como hairpin apertado logo após a largada, a reta de Kemmel longa e reta (o trecho mais reconhecível do circuito de verdade, entre Eau Rouge/Raidillon e Les Combes), setor central sinuoso (Bruxelles/Rivage → Pouhon → Fagnes) e um retorno longo por Stavelot → Blanchimont até o Bus Stop. Coordenadas reescalonadas pra usar melhor o quadro 0..1 do desenho. Verificado visualmente no debug (T-003) e na view real do jogo — a silhueta agora é reconhecível.
 
+### 2.7 T-006 — Deploy contínuo (GitHub Pages)
+
+- Repositório criado pelo PO em `github.com/daniellimabr/racing-manager`; git local apontado pra ele (`origin`), branch renomeado de `master` pra `main` (era o nome herdado do `git init` da sessão anterior, antes de eu ajustar `init.defaultBranch`).
+- `.github/workflows/deploy.yml`: a cada push na `main`, roda `npm ci && npm test && npm run build` e publica `dist/` via `actions/upload-pages-artifact` + `actions/deploy-pages`. PO trocou a fonte do Pages pra "GitHub Actions" nas configurações do repo (só o dono consegue mexer nisso).
+- `vite.config.ts` ganhou `base: '/racing-manager/'` — o site fica em `daniellimabr.github.io/racing-manager/`, não na raiz do domínio; sem isso os assets quebrariam.
+- Token do PostHog injetado como env var direto no passo de build do workflow (não fica em arquivo do repo) — é o mesmo project token write-only já documentado como seguro pra expor no client (Claude-Tech.md §3), agora alimentando o build de produção também, não só o `.env` local.
+- **Autenticação do push:** não guardei nenhuma credencial neste ambiente (sem credential helper configurado). O PO gerou 2 tokens fine-grained de curta duração (repo `racing-manager`, permissões Contents + Workflows em "Read and write") e colou no chat pra eu usar só no comando do push — nunca gravados em `.git/config` nem em nenhum arquivo (usados só inline no argumento do comando). Os fine-grained tokens do GitHub exigem a permissão "Workflows" separada de "Contents" pra aceitar mudanças em `.github/workflows/` — na 1ª tentativa faltou essa permissão, corrigido gerando outro token já com as duas.
+- Build de produção verificado localmente antes do push (`npm run build`, ~365 KB gzip no bundle principal — a maior parte é o Phaser; aviso de chunk grande do Vite, não bloqueia nada agora mas vale revisitar se afetar o load em 4G).
+- 1ª run do workflow falhou com `startup_failure` — aconteceu antes do PO trocar a fonte do Pages pra "Actions", não é um problema no workflow em si. Re-disparada manualmente depois.
+
+### 2.8 T-108 — Telemetria completa (eventos v1)
+
+Sobre o que já existia do T-005 (`session_start`/`session_end`/`race_start`/`race_end`), completei o funil inteiro descrito no Claude-Tech.md §4:
+
+- `challenge_result`: a cada desafio resolvido (trackId, challengeId, kind, tier, nitroUsed, overtakeAttempt, gapBefore/gapAfter, healthAfter).
+- `boost_chosen`: ao confirmar a escolha (opções oferecidas + escolhida, volta).
+- `overtake`: quando `resolveCurrent` reporta `positionChanged` (direção + contexto: `attempt`/`natural`/`pit`).
+- `dnf`: no instante em que `raceState.dnf` vira `true` (motivo, volta, desafio).
+- `revive_decision`: nos 2 botões do overlay de DNF — só dispara quando o revive de fato estava disponível como opção (não dispara um "recusou" falso quando não havia revive pra recusar).
+- `race_end` ganhou `manualAbandon` (`true` quando termina via "Encerrar corrida" no overlay de DNF, `false` na chegada natural).
+- Tela de fim ganhou o prompt "quer jogar de novo? (1–5)" — `feedback_score` ao clicar numa nota. Implementado com um sub-container próprio pra não destruir o texto do resumo ao mostrar "Valeu pelo feedback!".
+
+Verificado visualmente (forçando DNF via corrida automatizada): resumo + prompt de feedback renderizam juntos sem sobreposição, clique na nota funciona, sem erros de console.
+
+### 2.9 T-106 — Juice (parte mecânica)
+
+`src/view/juice.ts`: SFX **sintetizados via Web Audio API** (osciladores + ruído filtrado) em vez de arquivos de áudio baixados de algum lugar — evita qualquer questão de licença nesta fase greybox e funciona offline, sem pipeline de asset. Vibração via `navigator.vibrate()` (Android; no-op silencioso em iOS/desktop, conforme já esperado no CLAUDE.md §9).
+
+- Contagem regressiva 3-2-1 + "JÁ!" antes da largada, com beep a cada número e tom mais grave + flash branco de câmera no "JÁ!".
+- Som de "clique" em todo botão (centralizado em `makeButton()`, um único lugar cobre boost/confirmar/nitro/ultrapassagem/TOCAR/revive/encerrar/nota).
+- Resultado do desafio: roxo = tom agudo + vibração curta; verde = tom neutro; vermelho/miss = ruído + vibração + shake leve de câmera (só se causou dano de verdade); DNF = ruído mais forte + vibração em padrão + shake maior + flash vermelho.
+- `juice.unlock()` chamado no 1º `pointerdown` da cena (política de autoplay dos navegadores exige gesto do usuário pra liberar `AudioContext`) — sem isso o primeiro som ficaria mudo.
+
+**Não dá pra validar sozinho:** o critério de aceite do T-106 é "perceptível em teste cego com/sem juice" — isso é sobre percepção humana, só o PO consegue avaliar. Fiz a parte de engenharia (some, vibra, brilha, sacode); falta o julgamento de "está bom" ou "está exagerado/de menos".
+
 ## 3. Pendências / decisões ambíguas registradas nesta sessão
 
 - **Boost: só 3 dos 8 conceitos do CLAUDE.md §6.1 estão implementados no core** (`pneu`/`freio`/`janela`; faltam nitro extra, rasante, reparo rápido, fôlego de ultrapassagem, recuperação de erro). Isso já era assim desde o T-002, não é uma regressão desta sessão — só nunca tinha sido registrado. A view oferece as 3 disponíveis a cada boost elegível. Decisão de qual conjunto priorizar pro M1 fica para o CTO/PO.
@@ -123,12 +160,12 @@ Essa é uma mudança de arquitetura no core (`raceState.ts`), não só um ajuste
 
 ## 6. Próximos passos (retomar na próxima sessão)
 
-1. **T-006 (bloqueada):** aguardando o PO criar conta Vercel/Netlify/GitHub Pages.
-2. **T-108:** integrar o restante dos eventos v1 (`challenge_result`, `boost_chosen`, `overtake`, `dnf`, `revive_decision`) + tela de nota 1–5 no resumo.
-3. **T-105/T-106:** feel pass (benchmark CSR2, juice) — precisa de playtest humano, não dá pra fazer 100% autônomo.
-4. **Reavaliar `OVERTAKE_GAP_THRESHOLD`** contra a nova escala de `gapToAhead` num playtest humano (seção 5).
-5. Se o Manager (M2) for consumir `RaceOutput.position`, revisitar a divergência entre posição do core e posição do grid (seção 3).
-6. Curadoria de pontos do traçado (seção 2.6) é uma aproximação de memória, não um traçado GPS real — se algum tester reconhecer alguma curva fora de posição, vale ajuste fino.
+1. **T-105 (benchmark CSR2):** aguardando o PO instalar o jogo de referência e trazer feedback — é a única peça do feel pass que só um humano faz.
+2. **Reavaliar `OVERTAKE_GAP_THRESHOLD`** contra a nova escala de `gapToAhead` num playtest humano (seção 5) — é exatamente o item 2 que o PO perguntou como testar: **basta abrir o link do GitHub Pages (ou `npm run dev` local, dá no mesmo) e jogar normalmente**, prestando atenção em quando a opção "Tentar ultrapassagem" aparece — se está aparecendo raro demais (gap raramente fica <1s) ou tarde demais (só perto do fim de cada "trecho" entre posições), o threshold ou a escala precisam de ajuste.
+3. Curadoria de pontos do traçado (seção 2.6) é uma aproximação de memória, não um traçado GPS real — o PO vai avaliar isso na próxima run humana (confirmado).
+4. Se o Manager (M2) for consumir `RaceOutput.position`, revisitar a divergência entre posição do core e posição do grid (seção 3).
+5. **T-109/T-110:** playtest estruturado (PO + irmãos) — bloqueia no Gate 1, é o próximo marco depois que o feel pass fechar.
+6. Chunk do bundle principal está grande (~365 KB gzip, majoritariamente Phaser) — considerar code-splitting se o load em 4G virar problema real no playtest.
 
 ## 7. Como rodar
 

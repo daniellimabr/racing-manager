@@ -16,6 +16,7 @@ import {
   DEFAULT_CAR_SETUP, DEFAULT_PIT_CREW_QUALITY,
 } from './viewConstants.js';
 import { track as trackEvent } from '../telemetry/analytics.js';
+import { juice } from './juice.js';
 
 const track = spaTrack as unknown as TrackDef;
 const PANEL_Y = CANVAS_HEIGHT - PANEL_HEIGHT;
@@ -92,8 +93,37 @@ export class RaceScene extends Phaser.Scene {
     this.add.rectangle(0, PANEL_Y, CANVAS_WIDTH, PANEL_HEIGHT, 0x1a1a1a).setOrigin(0, 0);
     this.panel = this.add.container(0, PANEL_Y);
 
+    this.input.once('pointerdown', () => juice.unlock());
+
     this.updateIconPositions(false);
-    this.startEventCycle();
+    this.showCountdown(() => this.startEventCycle());
+  }
+
+  /** Contagem 3-2-1 + "Já!" antes da largada (T-106 — juice). */
+  private showCountdown(onComplete: () => void): void {
+    const text = this.add.text(CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2, '3', {
+      fontSize: '96px', color: '#ffffff', fontStyle: 'bold',
+    }).setOrigin(0.5).setDepth(1000);
+    juice.unlock();
+    juice.countdownBeep();
+    let count = 3;
+    const tick = () => {
+      count--;
+      if (count > 0) {
+        text.setText(String(count));
+        juice.countdownBeep();
+        this.time.delayedCall(650, tick);
+      } else {
+        text.setText('JÁ!');
+        juice.go();
+        this.cameras.main.flash(150, 255, 255, 255);
+        this.time.delayedCall(450, () => {
+          text.destroy();
+          onComplete();
+        });
+      }
+    };
+    this.time.delayedCall(650, tick);
   }
 
   update(time: number): void {
@@ -225,7 +255,10 @@ export class RaceScene extends Phaser.Scene {
     const bg = this.add.rectangle(0, 0, w, h, color, 1).setOrigin(0, 0).setInteractive({ useHandCursor: true });
     const text = this.add.text(w / 2, h / 2, label, { fontSize: '13px', color: '#111111', fontStyle: 'bold' })
       .setOrigin(0.5);
-    bg.on('pointerdown', onClick);
+    bg.on('pointerdown', () => {
+      juice.click();
+      onClick();
+    });
     c.add([bg, text]);
     return c;
   }
@@ -407,6 +440,23 @@ export class RaceScene extends Phaser.Scene {
       trackEvent('dnf', {
         trackId: track.id, lap: this.raceState.lap, reason: this.raceState.dnfReason, challengeId,
       });
+    }
+
+    // juice (T-106): som + vibração + câmera reagindo ao resultado
+    if (!wasDnf && this.raceState.dnf) {
+      juice.crash();
+      juice.vibrate([100, 50, 100]);
+      this.cameras.main.shake(300, 0.02);
+      this.cameras.main.flash(200, 200, 0, 0);
+    } else if (tier === 'purple') {
+      juice.perfect();
+      juice.vibrate(20);
+    } else if (tier === 'green') {
+      juice.good();
+    } else if (tier === 'red' || tier === 'miss') {
+      juice.crash();
+      juice.vibrate(40);
+      if (result.damage > 0) this.cameras.main.shake(150, 0.008);
     }
 
     this.clearPanel();
