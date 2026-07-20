@@ -2,7 +2,7 @@
 
 > Documento vivo mantido pelo agente TechLead-Racing (ver protocolo em Claude-Tech.md, seção 1.1).
 > Anexar junto com CLAUDE.md e Claude-Tech.md em conversas sobre a trilha Racing.
-> Última atualização: 2026-07-20 (sessão 2, encerramento — traçado de Spa corrigido com mapa real, deploy pendente de instabilidade do GitHub, seção 6 tem o handoff completo pra próxima sessão)
+> Última atualização: 2026-07-20 (sessão 3 — feedback CSR2 traduzido em demo greybox (T-105), roteiro de playtest estruturado montado (T-109/T-110), deploy ainda bloqueado pelo mesmo outage do GitHub)
 
 ## 1. Status do backlog
 
@@ -13,16 +13,16 @@
 | T-003 Pista como dado + render de debug | ✅ **Feito nesta sessão** | schema ganhou `path`/`pitPathIndex`/`pathIndex` (faltava na sessão 1); `track-debug.html` — ver seção 2.1 |
 | T-004 Harness de bots | ✅ Feito | (sessão 1); estendido nesta sessão com métricas de vitória/pódio |
 | T-005 Telemetria (PostHog) | ✅ **Feito nesta sessão** | Wrapper + modo offline + `session_start`/`session_end`/`race_start`/`race_end` — ver seção 2.5 |
-| T-006 Deploy contínuo | ⏳ **Quase — bloqueado por outage do GitHub** | Todo o setup está pronto e correto (workflow, `base` do Vite, repo, Pages configurado); só falta a 1ª publicação completar, travada pelo "partial outage" do GitHub Actions no momento do encerramento desta sessão — ver seção 2.7 |
+| T-006 Deploy contínuo | ⏳ **Ainda bloqueado — mesmo outage, confirmado de novo na sessão 3** | Setup correto, nada de código pendente. Reconfirmado no início da sessão 3 (2026-07-20 ~01:46 UTC): site ainda 404, componente Actions do GitHub em `partial_outage` (junto com API Requests e Issues), há uma run manual presa em `queued` desde 01:16 UTC. Ver seção 2.7 |
 | T-101 Simulação de grid (12 carros) | ✅ **Feito nesta sessão** | `src/core/grid.ts` — ver seção 2.2 |
 | T-102 Tela de corrida Phaser | ✅ **Feito nesta sessão** | `src/view/` — ver seção 2.3 |
 | T-103 Fluxo completo integrado | ✅ **Feito nesta sessão** | Idem |
 | T-104 Animação entre eventos | ✅ **Feito nesta sessão** | Idem |
-| T-105 (benchmark CSR2) | ⏳ Bloqueada no PO | PO ainda não instalou o CSR2; parte mecânica adiantada via T-106 |
+| T-105 (benchmark CSR2) | ⏳ **Feedback recebido e traduzido em demo nesta sessão — falta integrar no core/view** | PO trouxe feedback qualitativo do CSR2; traduzido em parâmetros + demo greybox interativa (`greybox-timing-csr2.html`) para validação visual antes de tocar no core. Ver seção 2.10 |
+| T-109/T-110 (roteiro de playtest) | ⏳ **Roteiro montado nesta sessão** | PO confirmou que o feel pass (T-106) está bom o suficiente para avançar; roteiro estruturado de 3 sessões documentado na seção 2.11. Ainda não executado |
 | T-106 (juice) | ✅ **Feito nesta sessão (parte mecânica)** | Contagem 3-2-1, SFX sintetizado, vibração, flash/shake — ver seção 2.9. Falta o "teste cego com/sem juice" (T-106 é sobre percepção humana, não dá pra validar sozinho) |
 | T-107 Balance pass | ✅ **Rodada 1 feita nesta sessão** | Ver seção 2.4 — **nota:** era a 1ª rodada de verdade, não a 2ª (ver seção 5) |
 | T-108 Telemetria completa | ✅ **Feito nesta sessão** | Ver seção 2.8 |
-| T-109 a T-110 | ⏳ Não iniciado | Precisam de playtest humano (Gate 1) |
 
 **Como rodar:** `npm install && npm test && npm run bots && npm run dev` (abre em `/index.html`; `/track-debug.html` é só o debug isolado da T-003).
 
@@ -126,12 +126,59 @@ Verificado visualmente (forçando DNF via corrida automatizada): resumo + prompt
 
 **Não dá pra validar sozinho:** o critério de aceite do T-106 é "perceptível em teste cego com/sem juice" — isso é sobre percepção humana, só o PO consegue avaliar. Fiz a parte de engenharia (some, vibra, brilha, sacode); falta o julgamento de "está bom" ou "está exagerado/de menos".
 
+### 2.10 T-105 — Feedback do CSR2 traduzido em parâmetros + demo greybox (sessão 3)
+
+O PO trouxe feedback qualitativo do CSR2 (sem deep-dive escrito do CPO ainda — direto da experiência de jogo). Resumo do que foi dito e como foi traduzido:
+
+| Observação do PO (CSR2) | Tradução proposta para o Racing Manager |
+|---|---|
+| Largada: manter a rotação do motor no nível ótimo (aqui = zona roxa) até o sinal verde; o botão aciona a aceleração no momento certo | Largada = a mesma mecânica de zona (roxo→vermelho) já existente, resolvida no instante do toque — **não é um novo modelo**, é o modelo atual com fase extra em torno |
+| Jogador se prepara por ~1–2s antes do início da contagem da largada; isso não é pertinente no meio da corrida | Só a largada ganha uma fase de "preparação" (proposto: 1,5s) antes do desafio "valer" — agulha já oscilando, sem pontuação, só pra pegar o ritmo. Saídas/frenagens do meio da corrida continuam sem essa fase |
+| Frenagem: sem contador numérico, mas com indicação visual do momento certo de chegada no ponto de frenagem | Trocar o vaivém contínuo do cursor (atual, igual em todo desafio) por **uma única passagem** (0→100, sem repetir) representando a aproximação do carro até o ponto de frenagem — a zona fica fixa, o "carro" se move uma vez só |
+| Aceleração: desafio de precisão ligado a um limite máximo de grip — apertar dentro do limite é melhor; antes ou depois perde tempo | Mesma "passagem única", mas a zona ideal fica deslocada para perto do fim do percurso (proposto: centro em 75 de 100, não 50) — apertar bem antes = pouca tração (perda pequena); não apertar ou apertar tarde demais = derrapagem (perda maior) |
+
+**Parâmetros propostos (a validar no playtest, não hardcoded em pedra):**
+
+- **Largada:** preparação 1,5 s (sem pontuação) → semáforo de 3 luzes (500 ms cada) → espera aleatória de 300–700 ms antes do sinal (evita memorização do timing) → janela de reação de 800 ms depois do sinal. Zona resolvida pela posição da agulha (oscilando a cada 700 ms) no instante do toque — mesmas larguras de zona do core (`ZONE_BASE_HALVES`). Apertar antes do sinal = largada queimada (miss forçado, ignora a zona). Não reagir dentro da janela = miss ("não reagiu").
+- **Frenagem:** aproximação única de 1,1 s, zona centrada em 50 (igual ao modelo atual — mudou o formato do movimento, não a posição da zona). Não apertar a tempo = miss ("não freou").
+- **Aceleração (saídas):** aproximação única de 1,0 s, zona centrada em **75** (não 50) — assimetria deliberada representando "antes do limite de grip = leve; depois = derrapagem". Não apertar a tempo = miss ("derrapou").
+
+**Demo greybox interativa:** `greybox-timing-csr2.html` (raiz do projeto, HTML/JS puro, sem dependência de build — abre direto no navegador por duplo clique ou via `npm run dev`). Os 3 modos (Largada/Aceleração/Frenagem) são selecionáveis por botão; cada um tem texto explicativo embutido e mostra os parâmetros em uso. Resolvido com uma reimplementação local de `tierFromPosition` (não importa do `core/` de propósito — é só pra validação de sensação, isolado do jogo de verdade, mesmo espírito do `track-debug.html` da T-003).
+
+Verificado com Playwright headless (instalado temporariamente e removido ao final, mesmo processo da sessão 2): testei os 3 modos, incluindo os casos de falha (largada queimada, não reagiu, não freou, derrapou) — todos resolvem corretamente, sem erros de console. Um bug real foi encontrado e corrigido nesse processo: o cálculo do instante do sinal verde da largada não somava a fase de preparação, fazendo o "vai" acontecer bem antes das luzes aparecerem na tela — corrigido antes de considerar a demo pronta.
+
+**Isto é uma demo de validação, não a implementação real.** Se o PO aprovar a sensação depois de testar, o próximo passo é portar isso para `src/view/RaceScene.ts` (troca o `triangleWave` contínuo por uma passagem única nos desafios de frenagem/aceleração, adiciona a fase de preparação só na largada) — o `core/timing.ts` precisaria de um pequeno ajuste (`tierFromPosition` aceitar um `center` configurável, hoje fixo em 50) para suportar a zona deslocada da aceleração; é uma mudança pequena e não deve afetar os testes existentes (todos os outros centros continuam em 50, comportamento idêntico). Não implementei isso no core ainda — deliberado, para não gastar esforço em algo que o PO ainda não validou visualmente.
+
+### 2.11 T-109/T-110 — Roteiro de playtest estruturado (Gate 1)
+
+PO confirmou que o feel pass (T-106) já está bom o suficiente para avançar. Como T-109 ("correções do playtest interno do PO") ainda não tem nenhuma lista de bugs à disposição — não houve playtest informal reportado ainda — o roteiro abaixo cobre T-110 diretamente; T-109 fica para quando o PO acumular achados jogando por conta própria antes das sessões formais.
+
+**Objetivo:** validar se a pilotagem (sem meta-game) é divertida sozinha, com sinal suficiente de 3 pessoas (PO + 2 irmãos).
+
+**Formato:** 3 sessões individuais (uma por pessoa), ~15–20 min cada, jogando `daniellimabr.github.io/racing-manager/` (ou `npm run dev` local se o deploy ainda não tiver fechado) no celular.
+
+**Roteiro por sessão:**
+1. Contexto mínimo (30s, falado, não em tela): "Você é o piloto principal da equipe. Aperte o botão certo na hora certa. Não tem tutorial — jogue como se fosse a primeira vez abrindo o jogo."
+2. Deixar rodar 2–3 corridas completas em Spa **sem interferência** (não corrigir, não explicar regras no meio) — a telemetria (`challenge_result`, `dnf`, `overtake` etc., já ligada via T-108) captura o resto.
+3. Perguntas pós-corrida (a nota 1–5 "quer jogar de novo?" já é capturada via `feedback_score` na própria tela de fim; as demais são conversa):
+   - O que foi mais divertido? O que foi mais frustrante?
+   - A largada/frenagem/aceleração pareceu justa ou parecia sorte?
+   - Você percebeu quando podia tentar ultrapassar? Entendeu por quê?
+   - O pit stop foi claro (o que estava acontecendo e por quê)?
+   - Notou o som/vibração/flash (T-106)? Achou exagerado, na medida, ou de menos?
+   - Repetiria por conta própria sem eu pedir?
+4. **Critério de gate** (herdado do Claude-Tech.md §7): funil de telemetria saudável (sem abandono massivo antes da 1ª corrida terminar), nota média "quer jogar de novo" ≥ 4/5, nenhum bug bloqueante encontrado nas 3 sessões.
+5. **Pré-requisito técnico:** telemetria real (não modo offline) exige `VITE_POSTHOG_KEY` no ambiente de build — já é o caso do deploy publicado (token injetado no workflow, seção 2.7); se testar via `npm run dev` local sem `.env`, a telemetria fica só no console, sem ir pro PostHog.
+
+**Não executado ainda nesta sessão** — fica a critério do PO agendar as 3 sessões quando quiser. Recomendo esperar o deploy (T-006) fechar antes de rodar oficialmente, pra já testar no link real e não em `npm run dev`.
+
 ## 3. Pendências / decisões ambíguas registradas nesta sessão
 
 - **Boost: só 3 dos 8 conceitos do CLAUDE.md §6.1 estão implementados no core** (`pneu`/`freio`/`janela`; faltam nitro extra, rasante, reparo rápido, fôlego de ultrapassagem, recuperação de erro). Isso já era assim desde o T-002, não é uma regressão desta sessão — só nunca tinha sido registrado. A view oferece as 3 disponíveis a cada boost elegível. Decisão de qual conjunto priorizar pro M1 fica para o CTO/PO.
 - **Posição exibida na HUD/resumo vem do grid (`deriveStandings`), não do `raceState.position` bruto.** São dois sistemas paralelos calculando "posição" (um pro harness headless, rápido; outro pro grid visual, mais rico) que **podem divergir entre si** — não há garantia formal de que concordem sempre, já que são independentes por design (ver seção 2.2). Pra M1 isso é aceitável (a UI só mostra a posição do grid, nunca a do core puro), mas é uma dívida de arquitetura a reavaliar se o Manager (M2) precisar ler `RaceOutput.position` de forma que precise bater exatamente com o que o jogador viu na tela — nesse caso, meça de novo, porque o `RaceOutput.position` atual (usado por `toRaceOutput`) ainda é o do core puro, não o do grid.
 - **`DEFAULT_PIT_CREW_QUALITY = 0.5`** — valor não especificado em nenhum documento, escolhido como ponto médio razoável até o M2 alimentar de verdade via `RaceInput.pitCrew`.
 - **Git não estava de fato inicializado** neste diretório, apesar do CLAUDE.md (seção 3, decisão de 2026-07-19) dizer "repositório inicializado na migração para o Claude Code". Inicializei nesta sessão (commit inicial = baseline do Sprint 1 antes de eu tocar em qualquer coisa) — sinalizando pro CTO corrigir essa entrada em Claude-Tech.md/CLAUDE.md se relevante.
+- **`tierFromPosition` (`core/timing.ts`) tem o centro da zona fixo em 50** — a proposta da aceleração (seção 2.10) precisa de um centro configurável (75) para ser implementada de verdade. Mudança pequena e de baixo risco (todo o resto do jogo continua chamando com centro 50, comportamento idêntico), mas ainda não feita — só a demo isolada (`greybox-timing-csr2.html`) usa isso hoje, fora do core.
 
 ## 4. Achado do harness de bots — rodada 0 (herdado da sessão 1, T-004)
 
@@ -167,13 +214,14 @@ Essa é uma mudança de arquitetura no core (`raceState.ts`), não só um ajuste
 
 ## 6. Próximos passos (retomar na próxima sessão)
 
-1. **T-006 — concluir o deploy:** só falta o Actions do GitHub sair do "partial outage" e o PO clicar em "Re-run all jobs" (seção 2.7). Confirmar que `https://daniellimabr.github.io/racing-manager/` carrega o jogo de verdade antes de considerar o T-006 100% fechado (o build local já foi validado, só falta a publicação em si).
-2. **T-105 (benchmark CSR2):** aguardando o PO instalar o jogo de referência e trazer feedback — é a única peça do feel pass que só um humano faz.
-3. **Reavaliar `OVERTAKE_GAP_THRESHOLD`** contra a nova escala de `gapToAhead` — feedback já recebido do PO nesta sessão: "overtake parece ok". Considerar resolvido por ora; reabrir só se um playtest mais longo (T-109/T-110) indicar o contrário.
-4. Se o Manager (M2) for consumir `RaceOutput.position`, revisitar a divergência entre posição do core e posição do grid (seção 3).
-5. **T-109/T-110:** playtest estruturado (PO + irmãos) — bloqueia no Gate 1, é o próximo marco depois que o feel pass (T-105) fechar.
-6. Chunk do bundle principal está grande (~365 KB gzip, majoritariamente Phaser) — considerar code-splitting se o load em 4G virar problema real no playtest.
-7. **Traçado de Spa (seção 2.6):** corrigido nesta sessão com base num mapa real, mas ainda vale conferência humana — a curadoria de onde exatamente cada desafio "pega" no traçado é aproximada.
+1. **T-006 — concluir o deploy:** ainda bloqueado pelo mesmo outage do GitHub, reconfirmado no início da sessão 3 (seção 2.7). Verificar de novo se `https://daniellimabr.github.io/racing-manager/` já carrega; se a run manual presa em `queued` tiver expirado, o PO clica "Re-run all jobs" de novo — não precisa de mim pra isso.
+2. **T-105 — validar a demo greybox com o PO:** `greybox-timing-csr2.html` está pronta e verificada tecnicamente (seção 2.10), mas falta o julgamento humano — "a largada/frenagem/aceleração assim parecem certas?". Só depois dessa validação vale portar pro `RaceScene.ts`/`core/timing.ts` de verdade.
+3. **Se a demo for aprovada:** implementar de fato — (a) `tierFromPosition` em `core/timing.ts` ganha um parâmetro `center` opcional (default 50, sem quebrar nenhum uso existente); (b) `RaceScene.ts` troca o `triangleWave` contínuo por uma passagem única (0→100) nos desafios de frenagem/aceleração; (c) largada ganha a fase de preparação + semáforo com espera aleatória. Escrever/ajustar testes de `core/timing.ts` para o novo parâmetro.
+4. **T-109/T-110 — executar o roteiro de playtest** (seção 2.11) com o PO + 2 irmãos, 3 sessões. Recomendo esperar o T-006 fechar antes, pra testar no link publicado.
+5. **Reavaliar `OVERTAKE_GAP_THRESHOLD`** contra a nova escala de `gapToAhead` — feedback já recebido do PO na sessão 2: "overtake parece ok". Considerar resolvido por ora; reabrir só se o playtest (item 4) indicar o contrário.
+6. Se o Manager (M2) for consumir `RaceOutput.position`, revisitar a divergência entre posição do core e posição do grid (seção 3).
+7. Chunk do bundle principal está grande (~365 KB gzip, majoritariamente Phaser) — considerar code-splitting se o load em 4G virar problema real no playtest.
+8. **Traçado de Spa (seção 2.6):** corrigido na sessão 2 com base num mapa real, mas ainda vale conferência humana — a curadoria de onde exatamente cada desafio "pega" no traçado é aproximada.
 
 ## 7. Como rodar
 
@@ -189,3 +237,5 @@ npm run dev      # jogo local
 Telemetria real (PostHog) precisa de um `.env` com `VITE_POSTHOG_KEY` (ver `.env.example`; token no Claude-Tech.md §3). Sem isso, fica em modo offline (console).
 
 **Deploy publicado (quando o T-006 fechar de vez):** `https://daniellimabr.github.io/racing-manager/`
+
+**Demo greybox da proposta CSR2 (T-105, seção 2.10):** abrir `greybox-timing-csr2.html` direto no navegador (duplo clique) ou via `npm run dev` — não depende de build, é HTML/JS puro isolado do jogo de verdade.
