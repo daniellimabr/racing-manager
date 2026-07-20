@@ -262,6 +262,7 @@ export class RaceScene extends Phaser.Scene {
     const options: BoostId[] = ['pneu', 'freio', 'janela'].sort(() => Math.random() - 0.5) as BoostId[];
     options.forEach((id, i) => {
       const btn = this.makeButton(16, 44 + i * 48, CANVAS_WIDTH - 32, 40, BOOST_LABELS[id], 0xffd54f, () => {
+        trackEvent('boost_chosen', { trackId: track.id, lap: this.raceState.lap, options, chosen: id });
         applyBoost(this.raceState, id);
         this.showPreChallenge(ev);
       });
@@ -380,9 +381,33 @@ export class RaceScene extends Phaser.Scene {
     this.challengeTimer?.remove();
     this.cursorGraphics.clear();
 
+    const ev = currentEvent(this.raceState);
+    const challengeId = ev.cornerId ?? (ev.kind === 'pit' ? 'pit' : 'largada');
+    const gapBefore = this.raceState.gapToAhead;
+    const overtakeAttempt = this.raceState.overtakeAttempt;
+    const wasDnf = this.raceState.dnf;
+
     const nitroUsed = this.pendingNitro ? tryUseNitro(this.raceState) : false;
     const result = resolveCurrent(this.raceState, tier, { nitroUsed });
     this.playerCumulativeTime -= result.gainSeconds;
+
+    trackEvent('challenge_result', {
+      trackId: track.id, challengeId, kind: ev.kind, tier, nitroUsed, overtakeAttempt,
+      gapBefore, gapAfter: this.raceState.gapToAhead, healthAfter: this.raceState.health,
+    });
+
+    if (result.positionChanged) {
+      trackEvent('overtake', {
+        trackId: track.id, lap: this.raceState.lap, direction: result.positionChanged,
+        context: ev.kind === 'pit' ? 'pit' : overtakeAttempt ? 'attempt' : 'natural',
+      });
+    }
+
+    if (!wasDnf && this.raceState.dnf) {
+      trackEvent('dnf', {
+        trackId: track.id, lap: this.raceState.lap, reason: this.raceState.dnfReason, challengeId,
+      });
+    }
 
     this.clearPanel();
     const msg = result.positionChanged === 'gained' ? ' — ultrapassou!' : result.positionChanged === 'lost' ? ' — foi ultrapassado!' : '';
@@ -408,8 +433,10 @@ export class RaceScene extends Phaser.Scene {
       fontSize: '16px', color: '#ff6666', fontStyle: 'bold',
     }));
     let y = 56;
-    if (!this.raceState.usedRevive) {
+    const reviveOffered = !this.raceState.usedRevive;
+    if (reviveOffered) {
       const reviveBtn = this.makeButton(16, y, CANVAS_WIDTH - 32, 44, 'Voltar à corrida (revive)', 0x81c784, () => {
+        trackEvent('revive_decision', { trackId: track.id, accepted: true });
         revive(this.raceState);
         this.startEventCycle();
       });
@@ -417,12 +444,13 @@ export class RaceScene extends Phaser.Scene {
       y += 56;
     }
     const endBtn = this.makeButton(16, y, CANVAS_WIDTH - 32, 44, 'Encerrar corrida', 0xe57373, () => {
-      this.showSummary();
+      if (reviveOffered) trackEvent('revive_decision', { trackId: track.id, accepted: false });
+      this.showSummary(true);
     });
     this.panel.add(endBtn);
   }
 
-  private showSummary(): void {
+  private showSummary(manualAbandon = false): void {
     this.clearPanel();
     const standings = this.currentStandings();
     const playerStanding = standings.find((x) => x.isPlayer)!;
@@ -445,7 +473,29 @@ export class RaceScene extends Phaser.Scene {
         lapsCompleted: output.lapsCompleted,
         dnf: output.dnf,
         reviveUsed: output.reviveUsed,
+        manualAbandon,
       });
+    }
+
+    this.showFeedbackPrompt();
+  }
+
+  /** "Quer jogar de novo?" 1-5, na tela de fim (T-108). */
+  private showFeedbackPrompt(): void {
+    const feedbackContainer = this.add.container(0, 0);
+    this.panel.add(feedbackContainer);
+    feedbackContainer.add(this.add.text(16, 145, 'Quer jogar de novo?', { fontSize: '14px', color: '#fff' }));
+
+    const gap = 8;
+    const btnW = (CANVAS_WIDTH - 32 - gap * 4) / 5;
+    for (let score = 1; score <= 5; score++) {
+      const x = 16 + (score - 1) * (btnW + gap);
+      const btn = this.makeButton(x, 175, btnW, 40, String(score), 0xffd54f, () => {
+        trackEvent('feedback_score', { trackId: track.id, score });
+        feedbackContainer.removeAll(true);
+        feedbackContainer.add(this.add.text(16, 145, 'Valeu pelo feedback!', { fontSize: '14px', color: '#81c784' }));
+      });
+      feedbackContainer.add(btn);
     }
   }
 }
