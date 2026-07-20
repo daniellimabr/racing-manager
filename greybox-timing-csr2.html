@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Racing Manager — Greybox: Largada / Aceleração / Frenagem (proposta CSR2)</title>
+    <title>Racing Manager — Greybox: Largada / Aceleração / Frenagem (proposta CSR2, v2)</title>
     <style>
       body {
         margin: 0;
@@ -16,7 +16,9 @@
         padding: 12px 0 40px;
       }
       h1 { font-size: 15px; margin: 0 0 4px; color: #ddd; text-align: center; padding: 0 12px; }
-      p.sub { font-size: 12px; color: #888; margin: 0 0 12px; text-align: center; padding: 0 16px; }
+      p.sub { font-size: 12px; color: #888; margin: 0 0 6px; text-align: center; padding: 0 16px; }
+      #legend { font-size: 12px; color: #aaa; margin-bottom: 10px; text-align: center; }
+      #legend b { color: #b266ff; }
       .modes { display: flex; gap: 8px; margin-bottom: 10px; }
       .modes button {
         background: #222; color: #ccc; border: 1px solid #444; border-radius: 6px;
@@ -30,7 +32,7 @@
         background: #3a3a55; user-select: none;
       }
       #action:active { filter: brightness(1.3); }
-      #result { margin-top: 12px; font-size: 15px; min-height: 22px; text-align: center; }
+      #result { margin-top: 12px; font-size: 14px; min-height: 40px; text-align: center; white-space: pre-line; }
       #history { display: flex; gap: 4px; margin-top: 8px; height: 14px; }
       .chip { width: 14px; height: 14px; border-radius: 3px; }
       #info {
@@ -43,15 +45,16 @@
     </style>
   </head>
   <body>
-    <h1>Demo greybox — proposta de largada/aceleração/frenagem baseada em CSR2 (T-105)</h1>
-    <p class="sub">Espaço, clique ou toque no botão grande = input único (autorama, 1 botão). Escolha um modo abaixo.</p>
+    <h1>Demo greybox v2 — largada/aceleração/frenagem (revisão pós-feedback, T-105)</h1>
+    <p class="sub">Espaço, clique ou toque no botão grande = input único (autorama, 1 botão). Na largada, o botão se <b>mantém pressionado</b> (segure); nos outros modos é um toque só.</p>
+    <div id="legend">Ordem de pontuação (confirmada no código real do jogo — <code>core/constants.ts</code>): <b>roxo</b> (melhor) &gt; verde &gt; amarelo &gt; vermelho (pior)</div>
     <div class="modes">
       <button data-mode="largada" class="active">Largada</button>
       <button data-mode="aceleracao">Aceleração</button>
       <button data-mode="frenagem">Frenagem</button>
     </div>
     <canvas id="c" width="440" height="220"></canvas>
-    <button id="action">APERTAR (ESPAÇO)</button>
+    <button id="action">APERTAR / SEGURAR</button>
     <div id="result"></div>
     <div id="history"></div>
     <button id="reset">limpar histórico</button>
@@ -68,7 +71,9 @@
       // ---- Zonas: mesmos valores base do core (ZONE_BASE_HALVES em src/core/constants.ts) ----
       const HALVES = { purple: 8, green: 20, amber: 35 };
       const TIER_COLOR = { purple: '#b266ff', green: '#2ecc71', amber: '#f1c40f', red: '#e74c3c', miss: '#555555' };
-      const TIER_LABEL = { purple: 'PERFEITO', green: 'BOM', amber: 'OK', red: 'RUIM' };
+      const TIER_LABEL = { purple: 'PERFEITO', green: 'BOM', amber: 'OK', red: 'RUIM', miss: 'FALHA' };
+      // Placar só pra deixar a ordem inequívoca na tela (não existe "pontos" no core de verdade — lá é GAIN em segundos).
+      const POINTS = { purple: 100, green: 70, amber: 40, red: 10, miss: 0 };
 
       function tierFromPosition(pos, center) {
         const d = Math.abs(pos - center);
@@ -78,6 +83,14 @@
         return 'red';
       }
 
+      function tierFromPoints(pts) {
+        if (pts >= 85) return 'purple';
+        if (pts >= 55) return 'green';
+        if (pts >= 20) return 'amber';
+        if (pts > 0) return 'red';
+        return 'miss';
+      }
+
       // ---- Parâmetros por modo (propostos, ajustáveis) ----
       const PARAMS = {
         largada: {
@@ -85,55 +98,64 @@
           lightIntervalMs: 500,
           holdMinMs: 300,
           holdMaxMs: 700,
-          needlePeriodMs: 700,
-          reactionWindowMs: 800,
+          holdRate: 0.16, // unidades/ms subindo enquanto segura
+          fallRate: 0.10, // unidades/ms caindo quando solta
           center: 50,
         },
         aceleracao: {
-          riseMs: 1000,
+          // alongado de 1000->1300ms em relação à v1: a janela roxa (±8 de 100) ficava
+          // tão curta em tempo real (~160ms) que era quase impossível de acertar de propósito
+          // — o que o PO leu como "verde/amarelo valendo mais" era, na prática, "roxo inatingível".
+          riseMs: 1300,
           center: 75,
         },
         frenagem: {
-          travelMs: 1100,
+          // agora em 2 etapas (pedido do PO): ponto de frenagem + duração da frenagem.
+          stage1Ms: 1300,
+          stage2Ms: 1300,
           center: 50,
         },
       };
 
       const INFO_TEXT = {
-        largada: `<b>Largada</b> — 1,5s de preparação (a agulha já oscila, sem contar pontos, só pra você pegar o ritmo).
-          Depois, 3 luzes acendem e apagam juntas num instante levemente aleatório (sinal de "vai", como um semáforo de largada real).
-          Apertar <b>antes</b> do sinal = largada queimada (perda grande, independe da zona). Apertar <b>depois</b> resolve pela zona
-          em que a agulha estava no instante do toque — igual às outras zonas do jogo (roxo→vermelho). Reagir devagar demais
-          (depois da janela) também é penalizado.
+        largada: `<b>Largada (revisada)</b> — agora é <b>segurar</b>, não só reagir. Aperte e segure para levar a agulha até a
+          zona roxa; solte um pouco para não passar direto — é preciso alternar para <b>manter</b> a agulha na zona até o semáforo
+          apagar. O resultado é lido automaticamente no instante em que as luzes apagam (sinal de "vai"), a partir de onde a
+          agulha estiver naquele momento — não existe mais um toque único de reação.
           <span id="params"></span>`,
-        aceleracao: `<b>Aceleração (saídas)</b> — o medidor de grip sobe uma vez, do zero ao máximo. A zona ideal fica perto do topo
-          (não no meio) — representa o limite de tração antes de derrapar. Apertar bem antes do topo = saiu com pouca tração
-          (perda pequena). Apertar muito perto do fim ou não apertar = derrapou (perda maior).
+        aceleracao: `<b>Aceleração (saídas)</b> — o medidor de grip sobe uma vez, do zero ao máximo. A zona ideal fica perto do
+          topo (não no meio) — representa o limite de tração antes de derrapar. Apertar bem antes do topo = saiu com pouca
+          tração (perda pequena). Apertar muito perto do fim ou não apertar = derrapou (perda maior). Placar mostrado em pontos
+          pra deixar a ordem roxo&gt;verde&gt;amarelo&gt;vermelho inequívoca.
           <span id="params"></span>`,
-        frenagem: `<b>Frenagem</b> — sem contagem numérica: o carro se aproxima do ponto de frenagem uma única vez. A zona ideal fica
-          no meio do percurso. Apertar no momento certo = frenagem limpa. Deixar passar sem apertar = não freou (perda grande,
-          o carro visivelmente "escapa" da zona).
+        frenagem: `<b>Frenagem (revisada — 2 etapas)</b> — agora são dois desafios em sequência: <b>(1) ponto de frenagem</b>
+          (quando começar a frear, o carro se aproxima uma vez) e <b>(2) duração da frenagem</b> (quanto sustentar o freio,
+          medidor de pressão enchendo uma vez). O resultado final é a <b>média</b> dos dois — uma etapa ruim pesa contra uma
+          boa, então vale se esforçar nas duas.
           <span id="params"></span>`,
       };
 
       let mode = 'largada';
       let attempts = [];
+      let state = { phase: 'idle' };
+      let holding = false;
+      let lastFrameTime = null;
 
-      // Estado da tentativa em curso (campos usados variam por modo)
-      let state = { phase: 'idle', t0: 0, goAt: 0, resolved: null };
-
-      function startAttempt() {
-        const now = performance.now();
+      function startAttempt(now) {
         if (mode === 'largada') {
           const p = PARAMS.largada;
           const lightsDoneAt = now + p.prepMs + p.lightIntervalMs * 3;
           const hold = p.holdMinMs + Math.random() * (p.holdMaxMs - p.holdMinMs);
-          state = { phase: 'running', t0: now, lightsDoneAt, goAt: lightsDoneAt + hold, resolved: null };
+          state = { phase: 'running', t0: now, lightsDoneAt, goAt: lightsDoneAt + hold, pos: 0, resolvedGo: false };
         } else if (mode === 'aceleracao') {
-          state = { phase: 'running', t0: now, resolved: null };
+          state = { phase: 'running', t0: now };
         } else {
-          state = { phase: 'running', t0: now, resolved: null };
+          state = { phase: 'running', stage: 1, t0: now, stage1: null };
         }
+      }
+
+      function tierResultText(tier, extra) {
+        return `${TIER_LABEL[tier]} (${POINTS[tier]} pts)${extra ? ' — ' + extra : ''}`;
       }
 
       function pushAttempt(tier, label) {
@@ -155,70 +177,90 @@
         }
       }
 
-      function handleInput() {
+      // ---- Input: pressionar/soltar (largada segura; outros modos resolvem no toque) ----
+      function onPressStart() {
         const now = performance.now();
         if (state.phase !== 'running') {
-          startAttempt();
+          startAttempt(now);
+          if (mode === 'largada') holding = true;
           return;
         }
         if (mode === 'largada') {
-          if (now < state.goAt) {
-            state.resolved = 'miss';
-            pushAttempt('miss', 'LARGADA QUEIMADA — apertou antes do sinal');
-            state.phase = 'idle';
-            return;
-          }
-          const p = PARAMS.largada;
-          const elapsedSinceGo = now - state.goAt;
-          const pos = 50 + 50 * triangleWave(now - state.t0, p.needlePeriodMs);
-          const tier = tierFromPosition(pos, p.center);
-          const lateTag = elapsedSinceGo > p.reactionWindowMs ? ' (reagiu tarde)' : '';
-          pushAttempt(tier, `${TIER_LABEL[tier]}${lateTag} — pos ${pos.toFixed(0)}, reação ${elapsedSinceGo.toFixed(0)}ms`);
-          state.phase = 'idle';
+          holding = true;
         } else if (mode === 'aceleracao') {
-          const p = PARAMS.aceleracao;
-          const elapsed = now - state.t0;
-          if (elapsed >= p.riseMs) return; // já expirou — auto-miss cuida disso no draw()
-          const pos = Math.min(100, (elapsed / p.riseMs) * 100);
-          const tier = tierFromPosition(pos, p.center);
-          pushAttempt(tier, `${TIER_LABEL[tier]} — grip ${pos.toFixed(0)}/100`);
-          state.phase = 'idle';
+          resolveAceleracao(now);
         } else {
-          const p = PARAMS.frenagem;
-          const elapsed = now - state.t0;
-          if (elapsed >= p.travelMs) return; // já expirou — auto-miss cuida disso no draw()
-          const pos = Math.min(100, (elapsed / p.travelMs) * 100);
-          const tier = tierFromPosition(pos, p.center);
-          pushAttempt(tier, `${TIER_LABEL[tier]} — pos ${pos.toFixed(0)}/100`);
-          state.phase = 'idle';
+          resolveFrenagemStage(now);
         }
+      }
+
+      function onPressEnd() {
+        holding = false;
+      }
+
+      function resolveAceleracao(now) {
+        const p = PARAMS.aceleracao;
+        const elapsed = now - state.t0;
+        if (elapsed >= p.riseMs) return; // expirou — autoResolveIfExpired já cuidou
+        const pos = Math.min(100, (elapsed / p.riseMs) * 100);
+        const tier = tierFromPosition(pos, p.center);
+        pushAttempt(tier, tierResultText(tier, `grip ${pos.toFixed(0)}/100`));
+        state.phase = 'idle';
+      }
+
+      function resolveFrenagemStage(now) {
+        const p = PARAMS.frenagem;
+        const dur = state.stage === 1 ? p.stage1Ms : p.stage2Ms;
+        const elapsed = now - state.t0;
+        if (elapsed >= dur) return; // expirou — autoResolveIfExpired já cuidou
+        const pos = Math.min(100, (elapsed / dur) * 100);
+        const tier = tierFromPosition(pos, p.center);
+        advanceFrenagemStage(tier, pos, now);
+      }
+
+      function advanceFrenagemStage(tier, pos, now) {
+        if (state.stage === 1) {
+          state.stage1 = { tier, pos };
+          state.stage = 2;
+          state.t0 = now;
+          resultEl.textContent = `Etapa 1/2 — ${tierResultText(tier, 'ponto de frenagem')}. Agora a duração...`;
+          resultEl.style.color = TIER_COLOR[tier];
+        } else {
+          finishFrenagem(state.stage1, { tier, pos });
+        }
+      }
+
+      function finishFrenagem(stage1, stage2) {
+        const avgPts = (POINTS[stage1.tier] + POINTS[stage2.tier]) / 2;
+        const finalTier = tierFromPoints(avgPts);
+        pushAttempt(
+          finalTier,
+          `Etapa 1 (ponto): ${tierResultText(stage1.tier)}\nEtapa 2 (duração): ${tierResultText(stage2.tier)}\nFinal (média): ${tierResultText(finalTier)} = ${avgPts.toFixed(0)} pts`,
+        );
+        state.phase = 'idle';
       }
 
       /** Se a janela de input passou sem toque, resolve como falha automática (mesmo papel do timer de auto-miss do jogo real). */
       function autoResolveIfExpired(now) {
         if (state.phase !== 'running') return;
         if (mode === 'largada') {
-          const p = PARAMS.largada;
-          if (now - state.goAt > p.reactionWindowMs) {
-            pushAttempt('miss', 'NÃO REAGIU — largada perdida');
+          if (!state.resolvedGo && now >= state.goAt) {
+            const tier = tierFromPosition(state.pos, PARAMS.largada.center);
+            state.resolvedGo = true;
+            pushAttempt(tier, tierResultText(tier, `agulha em ${state.pos.toFixed(0)} no sinal`));
             state.phase = 'idle';
           }
         } else if (mode === 'aceleracao') {
           if (now - state.t0 >= PARAMS.aceleracao.riseMs) {
-            pushAttempt('miss', 'DERRAPOU — perdeu o momento do grip');
+            pushAttempt('miss', tierResultText('miss', 'derrapou, perdeu o momento'));
             state.phase = 'idle';
           }
         } else {
-          if (now - state.t0 >= PARAMS.frenagem.travelMs) {
-            pushAttempt('miss', 'NÃO FREOU — passou direto da zona');
-            state.phase = 'idle';
+          const dur = state.stage === 1 ? PARAMS.frenagem.stage1Ms : PARAMS.frenagem.stage2Ms;
+          if (now - state.t0 >= dur) {
+            advanceFrenagemStage('miss', 100, now);
           }
         }
-      }
-
-      function triangleWave(elapsedMs, periodMs) {
-        const t = (elapsedMs % periodMs) / periodMs;
-        return t < 0.5 ? (4 * t - 1) : (3 - 4 * t);
       }
 
       function drawZoneBar(x, y, w, h, center, orientation) {
@@ -244,11 +286,21 @@
       }
 
       function draw() {
+        const now = performance.now();
+        const dt = lastFrameTime == null ? 0 : now - lastFrameTime;
+        lastFrameTime = now;
+
+        if (mode === 'largada' && state.phase === 'running') {
+          const p = PARAMS.largada;
+          const rate = holding ? p.holdRate : -p.fallRate;
+          state.pos = Math.max(0, Math.min(100, state.pos + rate * dt));
+        }
+
+        autoResolveIfExpired(now);
+
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.fillStyle = '#1a1a1a';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
-        const now = performance.now();
-        autoResolveIfExpired(now);
 
         if (mode === 'largada') drawLargada(now);
         else if (mode === 'aceleracao') drawAceleracao(now);
@@ -261,22 +313,20 @@
         const p = PARAMS.largada;
         const barX = 40, barY = 150, barW = 360, barH = 26;
 
+        ctx.font = '13px system-ui';
+        ctx.textAlign = 'center';
         if (state.phase !== 'running') {
           ctx.fillStyle = '#889';
-          ctx.font = '13px system-ui';
-          ctx.textAlign = 'center';
-          ctx.fillText('Aperte para se preparar para a largada', canvas.width / 2, 40);
+          ctx.fillText('Aperte e segure para começar a controlar a rotação', canvas.width / 2, 40);
         } else {
           const elapsed = now - state.t0;
           const inPrep = elapsed < p.prepMs;
-          const lightsElapsed = now - (state.t0 + 0); // luzes começam já na preparação, contam junto
-          ctx.font = '13px system-ui';
-          ctx.textAlign = 'center';
-          ctx.fillStyle = '#889';
           if (inPrep) {
-            ctx.fillText('PREPARE-SE (a agulha ainda não conta)', canvas.width / 2, 40);
+            ctx.fillStyle = '#889';
+            ctx.fillText('PREPARE-SE (controle a agulha, ainda não conta)', canvas.width / 2, 40);
           } else if (now < state.lightsDoneAt) {
-            ctx.fillText('...', canvas.width / 2, 40);
+            ctx.fillStyle = '#889';
+            ctx.fillText('Mantenha a agulha na zona roxa...', canvas.width / 2, 40);
           } else if (now < state.goAt) {
             ctx.fillStyle = '#e74c3c';
             ctx.fillText('AGUARDE...', canvas.width / 2, 40);
@@ -285,7 +335,6 @@
             ctx.fillText('VAI!!', canvas.width / 2, 40);
           }
 
-          // luzes
           const nLights = 3;
           for (let i = 0; i < nLights; i++) {
             const onAt = state.t0 + p.prepMs + i * p.lightIntervalMs;
@@ -300,10 +349,12 @@
         drawZoneBar(barX, barY, barW, barH, p.center, 'h');
 
         if (state.phase === 'running') {
-          const pos = 50 + 50 * triangleWave(now - state.t0, p.needlePeriodMs);
-          const nx = barX + (pos / 100) * barW;
+          const nx = barX + (state.pos / 100) * barW;
           ctx.fillStyle = '#fff';
           ctx.fillRect(nx - 2, barY - 6, 4, barH + 12);
+          ctx.font = '12px system-ui';
+          ctx.fillStyle = '#ccc';
+          ctx.fillText(`agulha: ${state.pos.toFixed(0)}`, canvas.width / 2, barY + barH + 22);
         }
       }
 
@@ -311,7 +362,6 @@
         const p = PARAMS.aceleracao;
         const barX = 200, barY = 20, barW = 60, barH = 180;
         drawZoneBar(barX, barY, barW, barH, p.center, 'v');
-
         ctx.strokeStyle = '#556';
         ctx.strokeRect(barX, barY, barW, barH);
 
@@ -340,32 +390,40 @@
         ctx.strokeStyle = '#556';
         ctx.strokeRect(barX, barY, barW, barH);
 
+        ctx.font = '12px system-ui';
+        ctx.fillStyle = '#889';
+        ctx.textAlign = 'center';
+
         if (state.phase === 'running') {
+          const dur = state.stage === 1 ? p.stage1Ms : p.stage2Ms;
           const elapsed = now - state.t0;
-          const pos = Math.min(105, (elapsed / p.travelMs) * 100);
+          const pos = Math.min(105, (elapsed / dur) * 100);
           const cx = barX + (pos / 100) * barW;
-          ctx.beginPath();
-          ctx.moveTo(cx, barY - 22);
-          ctx.lineTo(cx - 8, barY - 6);
-          ctx.lineTo(cx + 8, barY - 6);
-          ctx.closePath();
-          ctx.fillStyle = '#ffdd33';
-          ctx.fill();
-          ctx.font = '12px system-ui';
-          ctx.fillStyle = '#889';
-          ctx.textAlign = 'center';
-          ctx.fillText('aproximando da curva...', canvas.width / 2, 40);
+          if (state.stage === 1) {
+            ctx.beginPath();
+            ctx.moveTo(cx, barY - 22);
+            ctx.lineTo(cx - 8, barY - 6);
+            ctx.lineTo(cx + 8, barY - 6);
+            ctx.closePath();
+            ctx.fillStyle = '#ffdd33';
+            ctx.fill();
+            ctx.fillText('Etapa 1/2 — aproximando do ponto de frenagem...', canvas.width / 2, 40);
+          } else {
+            ctx.fillStyle = 'rgba(255,255,255,0.15)';
+            ctx.fillRect(barX, barY - 26, barW, 14);
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(barX, barY - 26, (pos / 100) * barW, 14);
+            ctx.fillText('Etapa 2/2 — sustentando a frenagem (pressão)...', canvas.width / 2, 40);
+          }
         } else {
-          ctx.font = '13px system-ui';
-          ctx.fillStyle = '#889';
-          ctx.textAlign = 'center';
-          ctx.fillText('Aperte para começar a aproximação', canvas.width / 2, 40);
+          ctx.fillText('Aperte para começar (2 etapas: ponto + duração)', canvas.width / 2, 40);
         }
       }
 
       function setMode(m) {
         mode = m;
         state = { phase: 'idle' };
+        holding = false;
         attempts = [];
         renderHistory();
         resultEl.textContent = '';
@@ -376,9 +434,15 @@
 
       document.querySelectorAll('.modes button').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));
       document.getElementById('reset').addEventListener('click', () => { attempts = []; renderHistory(); resultEl.textContent = ''; });
-      actionBtn.addEventListener('click', handleInput);
+
+      actionBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); onPressStart(); });
+      actionBtn.addEventListener('pointerup', onPressEnd);
+      actionBtn.addEventListener('pointerleave', onPressEnd);
       window.addEventListener('keydown', (e) => {
-        if (e.code === 'Space') { e.preventDefault(); handleInput(); }
+        if (e.code === 'Space') { e.preventDefault(); if (!e.repeat) onPressStart(); }
+      });
+      window.addEventListener('keyup', (e) => {
+        if (e.code === 'Space') onPressEnd();
       });
 
       setMode('largada');

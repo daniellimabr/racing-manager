@@ -137,7 +137,7 @@ O PO trouxe feedback qualitativo do CSR2 (sem deep-dive escrito do CPO ainda —
 | Frenagem: sem contador numérico, mas com indicação visual do momento certo de chegada no ponto de frenagem | Trocar o vaivém contínuo do cursor (atual, igual em todo desafio) por **uma única passagem** (0→100, sem repetir) representando a aproximação do carro até o ponto de frenagem — a zona fica fixa, o "carro" se move uma vez só |
 | Aceleração: desafio de precisão ligado a um limite máximo de grip — apertar dentro do limite é melhor; antes ou depois perde tempo | Mesma "passagem única", mas a zona ideal fica deslocada para perto do fim do percurso (proposto: centro em 75 de 100, não 50) — apertar bem antes = pouca tração (perda pequena); não apertar ou apertar tarde demais = derrapagem (perda maior) |
 
-**Parâmetros propostos (a validar no playtest, não hardcoded em pedra):**
+**Parâmetros propostos na v1 (a validar no playtest, não hardcoded em pedra):**
 
 - **Largada:** preparação 1,5 s (sem pontuação) → semáforo de 3 luzes (500 ms cada) → espera aleatória de 300–700 ms antes do sinal (evita memorização do timing) → janela de reação de 800 ms depois do sinal. Zona resolvida pela posição da agulha (oscilando a cada 700 ms) no instante do toque — mesmas larguras de zona do core (`ZONE_BASE_HALVES`). Apertar antes do sinal = largada queimada (miss forçado, ignora a zona). Não reagir dentro da janela = miss ("não reagiu").
 - **Frenagem:** aproximação única de 1,1 s, zona centrada em 50 (igual ao modelo atual — mudou o formato do movimento, não a posição da zona). Não apertar a tempo = miss ("não freou").
@@ -147,7 +147,29 @@ O PO trouxe feedback qualitativo do CSR2 (sem deep-dive escrito do CPO ainda —
 
 Verificado com Playwright headless (instalado temporariamente e removido ao final, mesmo processo da sessão 2): testei os 3 modos, incluindo os casos de falha (largada queimada, não reagiu, não freou, derrapou) — todos resolvem corretamente, sem erros de console. Um bug real foi encontrado e corrigido nesse processo: o cálculo do instante do sinal verde da largada não somava a fase de preparação, fazendo o "vai" acontecer bem antes das luzes aparecerem na tela — corrigido antes de considerar a demo pronta.
 
-**Isto é uma demo de validação, não a implementação real.** Se o PO aprovar a sensação depois de testar, o próximo passo é portar isso para `src/view/RaceScene.ts` (troca o `triangleWave` contínuo por uma passagem única nos desafios de frenagem/aceleração, adiciona a fase de preparação só na largada) — o `core/timing.ts` precisaria de um pequeno ajuste (`tierFromPosition` aceitar um `center` configurável, hoje fixo em 50) para suportar a zona deslocada da aceleração; é uma mudança pequena e não deve afetar os testes existentes (todos os outros centros continuam em 50, comportamento idêntico). Não implementei isso no core ainda — deliberado, para não gastar esforço em algo que o PO ainda não validou visualmente.
+#### 2.10.1 Revisão v2 — feedback do PO depois de testar a v1
+
+PO testou a v1 e trouxe 3 pontos:
+
+1. **Largada não funcionou:** reagir no instante do sinal verde arriscava pegar a agulha numa zona ruim (ela oscilava sozinha, fora do controle do jogador). Proposta do PO: o jogador **segura o botão pra controlar/manter** a agulha na zona boa até o sinal aparecer, em vez de só reagir uma vez.
+2. **Aceleração e frenagem pareciam premiar verde/amarelo mais que roxo.** PO explicou a referência (setores da F1: vermelho < amarelo < verde < roxo, roxo = mais rápido da sessão) e pediu revisão na documentação e no código.
+3. **Frenagem deveria ter 2 desafios em sequência:** um pro ponto de frenagem, outro pra duração da frenagem — resultado final = combinação (média) dos dois.
+
+**Investigação do ponto 2 antes de mudar qualquer coisa** (importante: isto podia ser um bug real no jogo, não só na demo). Conferi o `core/constants.ts` (tabela `GAIN`: roxo 0.30 > verde 0.15 > amber 0 > vermelho −0.20 > miss −0.40) e o `RaceScene.ts` (as zonas são desenhadas aninhadas, roxo por último/por cima, ou seja, é a menor e mais central) — **a ordem já está correta no jogo de verdade e no CLAUDE.md** (glossário: "roxa = perfeita"). O problema era específico da demo v1: numa passagem única (rampa de 1s), a zona roxa (±8 de 100) dura só ~160ms de tempo real — praticamente impossível de acertar de propósito por reação humana. Isso fazia o jogador cair em verde/amarelo com muito mais frequência, o que parece "inversão" mesmo a pontuação estando certa. Não é um bug de ordenação, é um problema de dificuldade/legibilidade específico do modelo de rampa única que eu introduzi na v1.
+
+**O que mudou na v2:**
+
+- **Largada — mecanismo de controle contínuo, não mais reação única.** Segurar o botão sobe a agulha (~0,16 unidades/ms); soltar deixa cair (~0,10 unidades/ms) — é preciso alternar pra manter a agulha perto do centro (zona roxa), parecido com um "equilibrar" (efeito Flappy Bird). O resultado é lido automaticamente no instante em que o sinal apaga, a partir de onde a agulha estiver — não existe mais toque de reação nem "largada queimada" por apertar antes (não faz sentido mais, já que não há um toque discreto de lançamento).
+- **Aceleração:** mesma rampa única, mas alongada de 1,0 s → 1,3 s (mais tempo real por zona, facilita acertar roxo de propósito) e ganhou **placar numérico visível** (roxo 100 pts > verde 70 > amarelo 40 > vermelho 10 > miss 0) — deixa a ordem inequívoca na tela, sem depender só da cor/palavra.
+- **Frenagem — 2 etapas sequenciais:** Etapa 1 "ponto de frenagem" (mesma aproximação única de antes, agora 1,3s) → Etapa 2 "duração da frenagem" (medidor de pressão enchendo uma vez, 1,3s, mesma zona centrada em 50) → resultado final = **média dos pontos das 2 etapas**, remapeada pro tier mais próximo (≥85 roxo, ≥55 verde, ≥20 amber, >0 vermelho, senão miss). Se a etapa 1 expirar sem toque (miss), a etapa 2 roda mesmo assim — a média sempre considera as duas.
+- **Legenda fixa** adicionada no topo da demo: "Ordem de pontuação (confirmada no código real do jogo): roxo (melhor) > verde > amarelo > vermelho (pior)" — pra deixar essa reafirmação visível e fácil de contestar se ainda parecer errado.
+
+Reverificado com Playwright headless (mesmo processo: instala temporário, testa, remove): simulei segurar o botão (mouse down/up) continuamente — agulha sobe até 100 e resolve "RUIM" corretamente; simulei soltar antes do sinal — agulha cai e resolve pela posição real no instante do sinal, sem exigir toque separado; testei as 2 etapas da frenagem em sequência (etapa 1 resolve e mostra texto intermediário, etapa 2 inicia automaticamente, resultado final mostra a média com o detalhamento das 2 etapas). Sem erros de console.
+
+**Ainda é demo de validação, não implementação real.** Pendências pra portar de verdade pro `RaceScene.ts`/`core/timing.ts` (sem mudança nesta sessão, mesma razão da v1 — aguardando validação humana):
+- `tierFromPosition` precisa de um `center` opcional (aceleração usa 75).
+- A largada real precisaria de um input contínuo (pointerdown/pointerup), diferente do toque único usado hoje em todos os outros desafios — é a única mudança de *input model*, não só de parâmetros, entre as três propostas.
+- Frenagem real passaria a ser 2 sub-desafios por curva em vez de 1 — dobra o número de inputs do jogador nas frenagens; vale considerar o impacto no "tempo total de corrida" (meta de ~5 min, Claude-Tech.md §5) antes de adotar em todas as curvas.
 
 ### 2.11 T-109/T-110 — Roteiro de playtest estruturado (Gate 1)
 
