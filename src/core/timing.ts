@@ -1,5 +1,5 @@
 import type { Tier } from './types.js';
-import { ZONE_BASE_HALVES, MAX_SCALE, OVERTAKE_GAP_THRESHOLD } from './constants.js';
+import { ZONE_BASE_HALVES, MAX_SCALE, OVERTAKE_GAP_THRESHOLD, PNEU_BOOST_SCALE } from './constants.js';
 
 export interface ZoneHalves {
   purple: number;
@@ -63,7 +63,7 @@ export function computeScale(opts: ScaleOptions): number {
     scale *= 1 - 0.5 * closeness;
   }
   if (!opts.isSaida && opts.pendingBoostIsPneu) {
-    scale *= 1.2;
+    scale *= PNEU_BOOST_SCALE;
   }
   return Math.min(scale, MAX_SCALE);
 }

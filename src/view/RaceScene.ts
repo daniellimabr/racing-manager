@@ -14,7 +14,7 @@ import {
   CURSOR_SWEEP_PERIOD_MS, CHALLENGE_TIME_LIMIT_MS, TWEEN_DURATION_MS,
   SECONDS_PER_LAP_VISUAL, MAX_VISUAL_GAP_SECONDS, TIER_COLORS, BOOST_LABELS, TEAM_COLORS,
   DEFAULT_CAR_SETUP, DEFAULT_PIT_CREW_QUALITY,
-  RAMP_DURATION_MS, ACCEL_CENTER, BRAKE_CENTER,
+  RAMP_DURATION_MS, ACCEL_CENTER, BRAKE_CENTER, JANELA_DURATION_SCALE,
   LARGADA_PREP_MS, LARGADA_LIGHT_INTERVAL_MS, LARGADA_HOLD_MIN_MS, LARGADA_HOLD_MAX_MS,
   LARGADA_HOLD_RATE, LARGADA_FALL_RATE,
 } from './viewConstants.js';
@@ -408,7 +408,8 @@ export class RaceScene extends Phaser.Scene {
   private showBoostChoice(ev: RaceEvent): void {
     this.clearPanel();
     this.panel.add(this.add.text(16, 12, 'Boost da volta — escolha 1:', { fontSize: '14px', color: '#fff' }));
-    const options: BoostId[] = ['pneu', 'freio', 'janela'].sort(() => Math.random() - 0.5) as BoostId[];
+    const allBoosts: BoostId[] = ['pneu', 'freio', 'janela', 'reparo_rapido', 'nitro_extra', 'recuperacao_erro'];
+    const options: BoostId[] = allBoosts.sort(() => Math.random() - 0.5).slice(0, 3);
     options.forEach((id, i) => {
       const btn = this.makeButton(16, 44 + i * 48, CANVAS_WIDTH - 32, 40, BOOST_LABELS[id], 0xffd54f, () => {
         trackEvent('boost_chosen', { trackId: track.id, lap: this.raceState.lap, options, chosen: id });
@@ -505,14 +506,18 @@ export class RaceScene extends Phaser.Scene {
     this.renderChallengeBarAndButton('Pit stop — toque no momento certo!');
     this.challengeActive = true;
     this.challengeStartTime = this.time.now;
-    this.challengeTimer = this.time.delayedCall(CHALLENGE_TIME_LIMIT_MS, () => this.onChallengeTapResolved('miss'));
+    const timeLimit = this.raceState.pendingBoost === 'janela' ? CHALLENGE_TIME_LIMIT_MS * JANELA_DURATION_SCALE : CHALLENGE_TIME_LIMIT_MS;
+    this.challengeTimer = this.time.delayedCall(timeLimit, () => this.onChallengeTapResolved('miss'));
   }
 
   /** Frenagem e aceleração (T-105): uma única passagem 0->100, sem vaivém contínuo. */
   private startRampChallenge(label: string): void {
     this.clearPanel();
     this.challengeMode = 'ramp';
-    this.challengeDurationMs = RAMP_DURATION_MS;
+    // "janela ampliada" (boost) só se aplica à frenagem/pit, mesma convenção de pneu/freio (não afeta a aceleração da saída que a ofereceu).
+    const ev = currentEvent(this.raceState);
+    const janelaActive = ev.kind !== 'saida' && this.raceState.pendingBoost === 'janela';
+    this.challengeDurationMs = janelaActive ? RAMP_DURATION_MS * JANELA_DURATION_SCALE : RAMP_DURATION_MS;
     this.renderChallengeBarAndButton(label);
     this.challengeActive = true;
     this.challengeStartTime = this.time.now;

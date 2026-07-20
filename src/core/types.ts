@@ -2,7 +2,7 @@ export type Tier = 'purple' | 'green' | 'amber' | 'red' | 'miss';
 
 export type EventKind = 'saida' | 'frenagem' | 'pit';
 
-export type BoostId = 'pneu' | 'freio' | 'janela';
+export type BoostId = 'pneu' | 'freio' | 'janela' | 'reparo_rapido' | 'nitro_extra' | 'recuperacao_erro';
 
 export interface CornerDef {
   id: string;

@@ -14,14 +14,25 @@ export const GAIN: Record<Tier, number> = {
  * Recalibrado no T-107 (rodada 1, ver Claude-Racing.md): os valores originais
  * (amber 5 / red 15 / miss 25) somados aos 145 eventos de uma corrida em Spa
  * geravam DNF de 56–100% em todos os perfis — dano por evento precisava cair.
+ *
+ * `purple` > 0 (sessão 5): decisão do PO registrada em Claude-Racing.md §2.14 —
+ * acertar a zona perfeita também desgasta o carro (correr no limite tem custo),
+ * não só errar. Valor inicial igual ao de `amber` (conservador); recalibrado
+ * empiricamente via harness nesta mesma sessão — ver Claude-Racing.md.
  */
 export const DAMAGE: Record<Tier, number> = {
-  purple: 0,
+  purple: 2,
   green: 0,
   amber: 1,
   red: 3,
   miss: 6,
 };
+
+/** Boost "reparo rápido" (CLAUDE.md §6.1): saúde recuperada na próxima frenagem/pit após escolhido. */
+export const REPAIR_BOOST_AMOUNT = 15;
+
+/** Boost "recuperação de erro" (CLAUDE.md §6.1): fator de alívio na perda de tempo do próximo erro (vermelho/miss). */
+export const ERROR_RECOVERY_RELIEF = 0.5;
 
 export const NITRO_GOOD_BONUS = 1.10; // +10% em ganhos positivos
 export const NITRO_BAD_RELIEF = 0.6; // penalidade cai para 60% do valor original

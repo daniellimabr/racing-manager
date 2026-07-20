@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { createRace, currentEvent, resolveCurrent, advance, revive, tryUseNitro, toRaceOutput } from '../src/core/raceState.js';
-import { POSITION_UNIT_SECONDS } from '../src/core/constants.js';
+import { createRace, currentEvent, resolveCurrent, advance, revive, tryUseNitro, toRaceOutput, applyBoost } from '../src/core/raceState.js';
+import { POSITION_UNIT_SECONDS, REPAIR_BOOST_AMOUNT } from '../src/core/constants.js';
 import type { TrackDef, CarSetup } from '../src/core/types.js';
 
 const track: TrackDef = {
@@ -21,13 +21,13 @@ describe('createRace', () => {
 });
 
 describe('resolveCurrent — gap e posição (progresso cumulativo, T-107)', () => {
-  it('resultado perfeito reduz o gap e não causa dano', () => {
+  it('resultado perfeito reduz o gap mas também desgasta a saúde (decisão do PO, Claude-Racing.md §2.14)', () => {
     const s = createRace(track, setup);
     advance(s); // sai da largada, vai para 1ª frenagem
     const before = s.gapToAhead;
     const r = resolveCurrent(s, 'purple', { nitroUsed: false });
     expect(s.gapToAhead).toBeLessThan(before);
-    expect(r.damage).toBe(0);
+    expect(r.damage).toBeGreaterThan(0);
   });
 
   it('ultrapassagem acontece quando o progresso acumulado cruza o limiar da próxima posição', () => {
@@ -106,6 +106,53 @@ describe('nitro', () => {
     expect(tryUseNitro(s)).toBe(true);
     expect(s.nitro).toBe(0);
     expect(tryUseNitro(s)).toBe(false);
+  });
+});
+
+describe('boosts (sessão 5)', () => {
+  it('nitro_extra concede 1 carga na hora, sem virar pendingBoost', () => {
+    const s = createRace(track, setup); // 1 carga
+    applyBoost(s, 'nitro_extra');
+    expect(s.nitro).toBe(2);
+    expect(s.pendingBoost).toBeNull();
+  });
+
+  it('reparo_rapido recupera saúde na próxima frenagem/pit (não na saída)', () => {
+    const s = createRace(track, setup);
+    s.health = 50;
+    applyBoost(s, 'reparo_rapido');
+    advance(s); // vai para a 1ª frenagem
+    resolveCurrent(s, 'amber', { nitroUsed: false }); // amber: 1 de dano, +REPAIR_BOOST_AMOUNT de cura
+    expect(s.health).toBe(50 - 1 + REPAIR_BOOST_AMOUNT);
+  });
+
+  it('reparo_rapido não deixa a saúde passar do máximo', () => {
+    const s = createRace(track, setup); // saúde cheia (100)
+    applyBoost(s, 'reparo_rapido');
+    advance(s);
+    resolveCurrent(s, 'green', { nitroUsed: false });
+    expect(s.health).toBe(setup.healthMax);
+  });
+
+  it('recuperacao_erro reduz a perda de tempo do próximo erro (vermelho/miss), não afeta saída', () => {
+    const s1 = createRace(track, setup);
+    advance(s1);
+    const withBoost = resolveCurrent(s1, 'miss', { nitroUsed: false });
+
+    const s2 = createRace(track, setup);
+    advance(s2);
+    applyBoost(s2, 'recuperacao_erro');
+    const withoutVsWith = resolveCurrent(s2, 'miss', { nitroUsed: false });
+
+    expect(Math.abs(withoutVsWith.gainSeconds)).toBeLessThan(Math.abs(withBoost.gainSeconds));
+  });
+
+  it('recuperacao_erro não altera resultados positivos (só alivia erro)', () => {
+    const s = createRace(track, setup);
+    advance(s);
+    applyBoost(s, 'recuperacao_erro');
+    const r = resolveCurrent(s, 'purple', { nitroUsed: false });
+    expect(r.gainSeconds).toBeCloseTo(0.30, 5);
   });
 });
 

@@ -3,7 +3,10 @@ import type {
   ResolveOptions, ResolveResult, RaceOutput,
 } from './types.js';
 import { buildEventSequence } from './track.js';
-import { GAIN, DAMAGE, NITRO_GOOD_BONUS, NITRO_BAD_RELIEF, POSITION_UNIT_SECONDS } from './constants.js';
+import {
+  GAIN, DAMAGE, NITRO_GOOD_BONUS, NITRO_BAD_RELIEF, POSITION_UNIT_SECONDS,
+  REPAIR_BOOST_AMOUNT, ERROR_RECOVERY_RELIEF,
+} from './constants.js';
 
 export function createRace(
   track: TrackDef,
@@ -71,7 +74,16 @@ export function setOvertakeAttempt(state: RaceState, attempt: boolean): void {
   state.overtakeAttempt = attempt;
 }
 
+/**
+ * Aplica um boost escolhido (1x por volta). A maioria fica "pendente" até o
+ * próximo evento não-saída (frenagem/pit) resolver — ver `resolveCurrent`.
+ * `nitro_extra` é exceção: concede a carga na hora, não há nada a adiar.
+ */
 export function applyBoost(state: RaceState, boost: BoostId): void {
+  if (boost === 'nitro_extra') {
+    state.nitro += 1;
+    return;
+  }
   state.pendingBoost = boost;
 }
 
@@ -87,9 +99,13 @@ export function resolveCurrent(state: RaceState, tier: Tier, opts: ResolveOption
   if (!isSaida && state.pendingBoost === 'freio') dmg = Math.round(dmg / 2);
   const appliedDmg = isSaida ? Math.round(dmg / 2) : dmg;
   state.health = Math.max(0, state.health - appliedDmg);
+  if (!isSaida && state.pendingBoost === 'reparo_rapido') {
+    state.health = Math.min(state.healthMax, state.health + REPAIR_BOOST_AMOUNT);
+  }
 
   let gain = GAIN[tier];
   if (opts.nitroUsed) gain = gain >= 0 ? gain * NITRO_GOOD_BONUS : gain * NITRO_BAD_RELIEF;
+  if (!isSaida && gain < 0 && state.pendingBoost === 'recuperacao_erro') gain *= ERROR_RECOVERY_RELIEF;
   if (isSaida) gain *= 0.5;
 
   state.raceProgress += gain;

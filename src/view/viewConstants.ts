@@ -58,10 +58,16 @@ export const TIER_COLORS: Record<Tier, number> = {
 };
 
 export const BOOST_LABELS: Record<BoostId, string> = {
-  pneu: 'Pneu novo (grip)',
+  pneu: 'Temperatura de pneu ideal',
   freio: 'Freio reforçado',
   janela: 'Janela ampliada',
+  reparo_rapido: 'Reparo rápido',
+  nitro_extra: 'Nitro extra',
+  recuperacao_erro: 'Recuperação de erro',
 };
+
+/** Boost "janela ampliada": fator de aumento no tempo disponível do próximo desafio de frenagem/pit. */
+export const JANELA_DURATION_SCALE = 1.3;
 
 export const TEAM_COLORS: Record<string, number> = {
   player: 0xffdd33,
