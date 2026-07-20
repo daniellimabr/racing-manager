@@ -45,8 +45,22 @@ export const ZONE_BASE_HALVES = { purple: 8, green: 20, amber: 35 };
  * (`RaceState.raceProgress`, nunca reseta): a posição é `startPosition -
  * floor(raceProgress / POSITION_UNIT_SECONDS)`. Calibrado via harness (bots)
  * pra Skilled vencer 30–40% das corridas: 3.7 → ~36%.
+ *
+ * T-107 (rodada 2, ver Claude-Racing.md §2.13): a frenagem passou a ser 2
+ * sub-desafios combinados (`combineTiers`, T-105/CSR2) — isso reduz bastante
+ * a frequência de resultados vermelho/miss em ~metade dos eventos da corrida
+ * (regressão à média de 2 sorteios), o que inflou o ganho médio de perfis já
+ * bons desproporcionalmente (Skilled foi de 31% pra 99% de vitórias com o
+ * valor antigo). Recalibrado de 3.7 → 4.25 (empírico, harness) pra trazer
+ * Skilled de volta a 30–40%. Isso puxou o Médio um pouco além da meta
+ * original (pos. média 3.67, meta era 4º–7º) e zerou quase toda taxa de DNF
+ * em todos os perfis — o dano de frenagem também sofre a mesma regressão à
+ * média. Ambos ficam registrados como pendência pra revisão após playtest
+ * humano (T-109/T-110), não foram forçados a caber com um 2º parâmetro
+ * porque o modelo se mostrou sensível nesta faixa (99% -> 1% de vitória do
+ * Skilled entre 3.7 e 4.6) — não é seguro afinar mais sem dado humano real.
  */
-export const POSITION_UNIT_SECONDS = 3.7;
+export const POSITION_UNIT_SECONDS = 4.25;
 
 /** valores padrão do carro do jogador até o Manager alimentar o RaceInput de verdade (M2) */
 export const DEFAULT_CAR_SETUP: CarSetup = { zoneScale: 1, healthMax: 180, nitroCharges: 3 };

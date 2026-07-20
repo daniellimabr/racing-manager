@@ -10,7 +10,7 @@ import path from 'node:path';
 import {
   createRace, currentEvent, resolveCurrent, advance, revive, tryUseNitro, toRaceOutput,
 } from '../src/core/index.js';
-import { tierFromPosition, zoneHalves, computeScale, canAttemptOvertake, rollTier } from '../src/core/timing.js';
+import { computeScale, canAttemptOvertake, rollTier, combineTiers } from '../src/core/timing.js';
 import { DEFAULT_CAR_SETUP } from '../src/core/constants.js';
 import type { TrackDef, Tier } from '../src/core/types.js';
 
@@ -60,20 +60,17 @@ function simulateOne(track: TrackDef, profile: Profile) {
     if (profile.nitroPolicy === 'always') nitroUsed = tryUseNitro(s);
     else if (profile.nitroPolicy === 'onOvertake' && overtakeAttempt) nitroUsed = tryUseNitro(s);
 
-    const scale = computeScale({
-      base: s.zoneScaleBase, isPit, isSaida, overtakeAttempt,
-      gap: s.gapToAhead, pendingBoostIsPneu: s.pendingBoost === 'pneu',
-    });
-    const halves = zoneHalves(scale);
-    const tier = rollTier(profile.weights);
-    // valida que o tier sorteado é alcançável dado o "cursor" simulado (aqui já é direto o tier)
-    void tierFromPosition(50, halves);
+    // frenagem agora é 2 sub-desafios combinados na view (T-105, ver Claude-Racing.md §2.13) —
+    // simula os 2 sorteios independentes e combina igual ao RaceScene, pra manter a distribuição
+    // de tiers do bot comparável à de um jogador de verdade nesse tipo de evento.
+    const tier = ev.kind === 'frenagem'
+      ? combineTiers(rollTier(profile.weights), rollTier(profile.weights))
+      : rollTier(profile.weights);
 
-    const result = resolveCurrent(s, tier, { nitroUsed });
+    resolveCurrent(s, tier, { nitroUsed });
     if ((tier === 'red' || tier === 'miss') && ev.cornerName) {
       killerCorners[ev.cornerName] = (killerCorners[ev.cornerName] ?? 0) + 1;
     }
-    void result;
     advance(s);
   }
 

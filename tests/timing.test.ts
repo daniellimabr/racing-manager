@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { tierFromPosition, zoneHalves, computeScale, canAttemptOvertake } from '../src/core/timing.js';
+import { tierFromPosition, zoneHalves, computeScale, canAttemptOvertake, combineTiers } from '../src/core/timing.js';
 
 describe('tierFromPosition', () => {
   const halves = zoneHalves(1);
@@ -14,6 +14,34 @@ describe('tierFromPosition', () => {
   it('respeita a fronteira entre verde e âmbar', () => {
     expect(tierFromPosition(50 - halves.green, halves)).toBe('green');
     expect(tierFromPosition(50 - halves.green - 0.01, halves)).toBe('amber');
+  });
+
+  it('aceita um centro deslocado (ex.: aceleração, centro em 75)', () => {
+    expect(tierFromPosition(75, halves, 75)).toBe('purple');
+    expect(tierFromPosition(0, halves, 75)).toBe('red'); // longe do centro 75 (d=75 > halves.amber)
+    expect(tierFromPosition(75 - halves.purple, halves, 75)).toBe('purple');
+  });
+
+  it('centro default (50) continua igual sem passar o 3º argumento', () => {
+    expect(tierFromPosition(50, halves)).toBe(tierFromPosition(50, halves, 50));
+  });
+});
+
+describe('combineTiers', () => {
+  it('dois roxos combinam em roxo', () => {
+    expect(combineTiers('purple', 'purple')).toBe('purple');
+  });
+  it('roxo + verde combina em roxo (média 85, no limite)', () => {
+    expect(combineTiers('purple', 'green')).toBe('purple');
+  });
+  it('roxo + miss combina em amber (regressão à média)', () => {
+    expect(combineTiers('purple', 'miss')).toBe('amber');
+  });
+  it('dois miss combinam em miss', () => {
+    expect(combineTiers('miss', 'miss')).toBe('miss');
+  });
+  it('é simétrico (ordem dos argumentos não importa)', () => {
+    expect(combineTiers('green', 'red')).toBe(combineTiers('red', 'green'));
   });
 });
 

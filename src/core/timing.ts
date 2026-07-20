@@ -16,13 +16,30 @@ export function zoneHalves(scale: number): ZoneHalves {
   };
 }
 
-/** Dado um valor 0-100 no cursor e as meias-larguras, retorna o tier acertado. */
-export function tierFromPosition(pos: number, halves: ZoneHalves): Tier {
-  const d = Math.abs(pos - 50);
+/** Dado um valor 0-100 no cursor e as meias-larguras, retorna o tier acertado. `center` (default 50) permite desafios com a zona ideal deslocada (ex.: aceleração — limite de grip perto do fim do percurso, não no meio). */
+export function tierFromPosition(pos: number, halves: ZoneHalves, center = 50): Tier {
+  const d = Math.abs(pos - center);
   if (d <= halves.purple) return 'purple';
   if (d <= halves.green) return 'green';
   if (d <= halves.amber) return 'amber';
   return 'red';
+}
+
+const TIER_POINTS: Record<Tier, number> = { purple: 100, green: 70, amber: 40, red: 10, miss: 0 };
+
+/**
+ * Combina 2 tiers (ex.: os 2 desafios da frenagem — ponto + duração) numa
+ * única nota final, pela média dos pontos remapeada pro tier mais próximo.
+ * Usado tanto pela view (RaceScene) quanto pelo harness de bots, pra manter
+ * o mesmo efeito de "regressão à média" em ambos.
+ */
+export function combineTiers(a: Tier, b: Tier): Tier {
+  const avg = (TIER_POINTS[a] + TIER_POINTS[b]) / 2;
+  if (avg >= 85) return 'purple';
+  if (avg >= 55) return 'green';
+  if (avg >= 20) return 'amber';
+  if (avg > 0) return 'red';
+  return 'miss';
 }
 
 export interface ScaleOptions {

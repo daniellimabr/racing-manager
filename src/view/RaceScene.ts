@@ -5,7 +5,7 @@ import {
   createRace, currentEvent, resolveCurrent, advance, revive, toRaceOutput,
   setOvertakeAttempt, applyBoost, tryUseNitro,
 } from '../core/raceState.js';
-import { tierFromPosition, zoneHalves, computeScale, canAttemptOvertake } from '../core/timing.js';
+import { tierFromPosition, zoneHalves, computeScale, canAttemptOvertake, combineTiers } from '../core/timing.js';
 import { createGridSim, advanceGrid, deriveStandings } from '../core/grid.js';
 import type { GridState, GridStanding } from '../core/grid.js';
 import { normalizedToScreen, pathIndexToT, pointAtT } from './pathUtils.js';
@@ -14,6 +14,9 @@ import {
   CURSOR_SWEEP_PERIOD_MS, CHALLENGE_TIME_LIMIT_MS, TWEEN_DURATION_MS,
   SECONDS_PER_LAP_VISUAL, MAX_VISUAL_GAP_SECONDS, TIER_COLORS, BOOST_LABELS, TEAM_COLORS,
   DEFAULT_CAR_SETUP, DEFAULT_PIT_CREW_QUALITY,
+  RAMP_DURATION_MS, ACCEL_CENTER, BRAKE_CENTER,
+  LARGADA_PREP_MS, LARGADA_LIGHT_INTERVAL_MS, LARGADA_HOLD_MIN_MS, LARGADA_HOLD_MAX_MS,
+  LARGADA_HOLD_RATE, LARGADA_FALL_RATE,
 } from './viewConstants.js';
 import { track as trackEvent } from '../telemetry/analytics.js';
 import { juice } from './juice.js';
@@ -67,6 +70,25 @@ export class RaceScene extends Phaser.Scene {
   private pendingOvertake = false;
   private raceStartTime = 0;
   private raceEnded = false;
+
+  // T-105: modelo de input varia por tipo de desafio (ver Claude-Racing.md §2.10/§2.13)
+  private challengeMode: 'sweep' | 'ramp' | 'hold' = 'sweep';
+  private challengeCenter = BRAKE_CENTER;
+  private challengeDurationMs = RAMP_DURATION_MS;
+
+  // frenagem: 2 sub-desafios (ponto + duração), combinados no final
+  private frenagemStage: 1 | 2 = 1;
+  private frenagemStage1Tier: Tier | null = null;
+
+  // largada: segurar para controlar a agulha até o sinal (não mais reação única)
+  private largadaPos = 0;
+  private largadaHolding = false;
+  private largadaGoAt = 0;
+  private largadaLightsDoneAt = 0;
+  private largadaResolved = false;
+  private largadaStatusText?: Phaser.GameObjects.Text;
+  private largadaLightsGfx?: Phaser.GameObjects.Graphics;
+  private lastFrameTime = 0;
 
   constructor() {
     super('RaceScene');
@@ -127,7 +149,13 @@ export class RaceScene extends Phaser.Scene {
   }
 
   update(time: number): void {
-    if (this.challengeActive) this.drawCursor(time);
+    const dt = this.lastFrameTime ? time - this.lastFrameTime : 0;
+    this.lastFrameTime = time;
+    if (this.challengeMode === 'hold') {
+      if (this.challengeActive) this.updateLargada(time, dt);
+    } else if (this.challengeActive) {
+      this.drawCursor();
+    }
   }
 
   // ---------- desenho estático ----------
@@ -349,7 +377,6 @@ export class RaceScene extends Phaser.Scene {
   }
 
   private startTimingChallenge(ev: RaceEvent): void {
-    this.clearPanel();
     const isSaida = ev.kind === 'saida';
     const isPit = ev.kind === 'pit';
     const scale = computeScale({
@@ -362,38 +389,162 @@ export class RaceScene extends Phaser.Scene {
     });
     this.challengeHalves = zoneHalves(scale);
 
-    this.panel.add(this.add.text(16, 8, `${isPit ? 'Pit stop' : ev.cornerName ?? 'Largada'} — toque no momento certo!`, { fontSize: '13px', color: '#fff' }));
-
-    // barra de fundo com as zonas coloridas (vermelho -> amber -> verde -> roxo -> verde -> amber -> vermelho)
-    const barX = 16, barY = 48, barW = CANVAS_WIDTH - 32, barH = 28;
-    const bar = this.add.graphics();
-    const zones: [Tier, number][] = [
-      ['red', 50], ['amber', this.challengeHalves.amber], ['green', this.challengeHalves.green], ['purple', this.challengeHalves.purple],
-    ];
-    let prevHalf = 50;
-    for (const [tier, half] of zones) {
-      const w = ((prevHalf) / 50) * barW;
-      bar.fillStyle(TIER_COLORS[tier], 1);
-      bar.fillRect(barX + barW / 2 - w / 2, barY, w, barH);
-      prevHalf = half;
+    const isLargada = isSaida && ev.cornerName === 'Largada';
+    if (isLargada) {
+      this.startLargadaChallenge();
+      return;
     }
-    this.panel.add(bar);
-
-    const goBtn = this.makeButton(16, barY + barH + 20, barW, 56, 'TOCAR', 0xffffff, () => this.handleTap());
-    this.panel.add(goBtn);
-
-    this.cursorGraphics = this.add.graphics();
-    this.panel.add(this.cursorGraphics);
-    this.challengeActive = true;
-    this.challengeStartTime = this.time.now;
-    this.challengeTimer = this.time.delayedCall(CHALLENGE_TIME_LIMIT_MS, () => {
-      if (this.challengeActive) this.resolveChallenge('miss');
-    });
+    if (ev.kind === 'frenagem') {
+      this.frenagemStage = 1;
+      this.frenagemStage1Tier = null;
+      this.challengeCenter = BRAKE_CENTER;
+      this.startRampChallenge(`${ev.cornerName ?? ''} — ponto de frenagem (1/2)`);
+      return;
+    }
+    if (isSaida) {
+      this.challengeCenter = ACCEL_CENTER;
+      this.startRampChallenge(`${ev.cornerName ?? ''} — aceleração, toque perto do limite de grip!`);
+      return;
+    }
+    this.challengeCenter = BRAKE_CENTER;
+    this.startSweepChallenge();
   }
 
-  private drawCursor(time: number): void {
-    const elapsed = time - this.challengeStartTime;
-    const pos = triangleWave(elapsed, CURSOR_SWEEP_PERIOD_MS);
+  /** Pit: mantém o vaivém contínuo original (fora do escopo da revisão CSR2 do T-105). */
+  private startSweepChallenge(): void {
+    this.clearPanel();
+    this.challengeMode = 'sweep';
+    this.renderChallengeBarAndButton('Pit stop — toque no momento certo!');
+    this.challengeActive = true;
+    this.challengeStartTime = this.time.now;
+    this.challengeTimer = this.time.delayedCall(CHALLENGE_TIME_LIMIT_MS, () => this.onChallengeTapResolved('miss'));
+  }
+
+  /** Frenagem e aceleração (T-105): uma única passagem 0->100, sem vaivém contínuo. */
+  private startRampChallenge(label: string): void {
+    this.clearPanel();
+    this.challengeMode = 'ramp';
+    this.challengeDurationMs = RAMP_DURATION_MS;
+    this.renderChallengeBarAndButton(label);
+    this.challengeActive = true;
+    this.challengeStartTime = this.time.now;
+    this.challengeTimer = this.time.delayedCall(this.challengeDurationMs, () => this.onChallengeTapResolved('miss'));
+  }
+
+  private renderChallengeBarAndButton(label: string): void {
+    this.panel.add(this.add.text(16, 8, `${label}`, { fontSize: '13px', color: '#fff' }));
+    const barX = 16, barY = 48, barW = CANVAS_WIDTH - 32, barH = 28;
+    const bar = this.add.graphics();
+    this.drawZoneBarGraphics(bar, barX, barY, barW, barH, this.challengeCenter);
+    this.panel.add(bar);
+    this.panel.add(this.makeButton(16, barY + barH + 20, barW, 56, 'TOCAR', 0xffffff, () => this.handleTap()));
+    this.cursorGraphics = this.add.graphics();
+    this.panel.add(this.cursorGraphics);
+  }
+
+  /** Desenha as zonas aninhadas (vermelho->amber->verde->roxo) em torno de um centro qualquer (não só 50 — ver aceleração). */
+  private drawZoneBarGraphics(
+    g: Phaser.GameObjects.Graphics, barX: number, barY: number, barW: number, barH: number, center: number
+  ): void {
+    const bands: [Tier, number, number][] = [
+      ['red', 0, 100],
+      ['amber', center - this.challengeHalves.amber, center + this.challengeHalves.amber],
+      ['green', center - this.challengeHalves.green, center + this.challengeHalves.green],
+      ['purple', center - this.challengeHalves.purple, center + this.challengeHalves.purple],
+    ];
+    for (const [tier, from, to] of bands) {
+      const f = Math.max(0, from);
+      const t = Math.min(100, to);
+      if (t <= f) continue;
+      g.fillStyle(TIER_COLORS[tier], 1);
+      g.fillRect(barX + (f / 100) * barW, barY, ((t - f) / 100) * barW, barH);
+    }
+  }
+
+  // ---------- largada: segurar para controlar a agulha (T-105) ----------
+
+  private startLargadaChallenge(): void {
+    this.clearPanel();
+    this.challengeMode = 'hold';
+    this.challengeCenter = BRAKE_CENTER;
+    this.largadaPos = 0;
+    this.largadaHolding = false;
+    this.largadaResolved = false;
+
+    const now = this.time.now;
+    this.challengeStartTime = now;
+    this.largadaLightsDoneAt = now + LARGADA_PREP_MS + LARGADA_LIGHT_INTERVAL_MS * 3;
+    const hold = LARGADA_HOLD_MIN_MS + Math.random() * (LARGADA_HOLD_MAX_MS - LARGADA_HOLD_MIN_MS);
+    this.largadaGoAt = this.largadaLightsDoneAt + hold;
+
+    this.panel.add(this.add.text(16, 8, 'Largada — segure para controlar a rotação!', { fontSize: '13px', color: '#fff' }));
+    this.largadaStatusText = this.add.text(CANVAS_WIDTH / 2, 30, 'PREPARE-SE', { fontSize: '13px', color: '#889988' }).setOrigin(0.5);
+    this.panel.add(this.largadaStatusText);
+    this.largadaLightsGfx = this.add.graphics();
+    this.panel.add(this.largadaLightsGfx);
+
+    const barX = 16, barY = 96, barW = CANVAS_WIDTH - 32, barH = 28;
+    const bar = this.add.graphics();
+    this.drawZoneBarGraphics(bar, barX, barY, barW, barH, BRAKE_CENTER);
+    this.panel.add(bar);
+    this.cursorGraphics = this.add.graphics();
+    this.panel.add(this.cursorGraphics);
+
+    const holdBtn = this.add.container(16, barY + barH + 20);
+    const bg = this.add.rectangle(0, 0, barW, 56, 0xffffff, 1).setOrigin(0, 0).setInteractive({ useHandCursor: true });
+    const text = this.add.text(barW / 2, 28, 'SEGURE', { fontSize: '13px', color: '#111111', fontStyle: 'bold' }).setOrigin(0.5);
+    bg.on('pointerdown', () => { juice.click(); this.largadaHolding = true; });
+    bg.on('pointerup', () => { this.largadaHolding = false; });
+    bg.on('pointerout', () => { this.largadaHolding = false; });
+    holdBtn.add([bg, text]);
+    this.panel.add(holdBtn);
+
+    this.challengeActive = true;
+  }
+
+  private updateLargada(time: number, dt: number): void {
+    const rate = this.largadaHolding ? LARGADA_HOLD_RATE : -LARGADA_FALL_RATE;
+    this.largadaPos = Math.max(0, Math.min(100, this.largadaPos + rate * dt));
+
+    const prepEnd = this.challengeStartTime + LARGADA_PREP_MS;
+    let label: string; let color: string;
+    if (time < prepEnd) { label = 'PREPARE-SE (ainda não conta)'; color = '#889988'; }
+    else if (time < this.largadaLightsDoneAt) { label = 'Mantenha a agulha na zona roxa...'; color = '#889988'; }
+    else if (time < this.largadaGoAt) { label = 'AGUARDE...'; color = '#e74c3c'; }
+    else { label = 'VAI!!'; color = '#2ecc71'; }
+    this.largadaStatusText?.setText(label).setColor(color);
+
+    this.largadaLightsGfx?.clear();
+    for (let i = 0; i < 3; i++) {
+      const onAt = prepEnd + i * LARGADA_LIGHT_INTERVAL_MS;
+      const isOn = time >= onAt && time < this.largadaGoAt;
+      this.largadaLightsGfx?.fillStyle(isOn ? 0xe74c3c : 0x332222, 1);
+      this.largadaLightsGfx?.fillCircle(180 + i * 40, 60, 10);
+    }
+
+    const barX = 16, barY = 96, barW = CANVAS_WIDTH - 32, barH = 28;
+    const x = barX + (this.largadaPos / 100) * barW;
+    this.cursorGraphics.clear();
+    this.cursorGraphics.fillStyle(0xffffff, 1);
+    this.cursorGraphics.fillRect(x - 2, barY - 4, 4, barH + 8);
+
+    if (!this.largadaResolved && time >= this.largadaGoAt) {
+      this.largadaResolved = true;
+      const tier = tierFromPosition(this.largadaPos, this.challengeHalves, BRAKE_CENTER);
+      this.onChallengeTapResolved(tier);
+    }
+  }
+
+  // ---------- resolução (comum a sweep/ramp/hold) ----------
+
+  private currentCursorPos(): number {
+    const elapsed = this.time.now - this.challengeStartTime;
+    if (this.challengeMode === 'sweep') return triangleWave(elapsed, CURSOR_SWEEP_PERIOD_MS);
+    return Math.min(100, (elapsed / this.challengeDurationMs) * 100);
+  }
+
+  private drawCursor(): void {
+    const pos = this.currentCursorPos();
     const barX = 16, barY = 48, barW = CANVAS_WIDTH - 32, barH = 28;
     const x = barX + (pos / 100) * barW;
     this.cursorGraphics.clear();
@@ -403,22 +554,55 @@ export class RaceScene extends Phaser.Scene {
 
   private handleTap(): void {
     if (!this.challengeActive) return;
-    const pos = triangleWave(this.time.now - this.challengeStartTime, CURSOR_SWEEP_PERIOD_MS);
-    const tier = tierFromPosition(pos, this.challengeHalves);
-    this.resolveChallenge(tier);
+    const pos = this.currentCursorPos();
+    const tier = tierFromPosition(pos, this.challengeHalves, this.challengeCenter);
+    this.onChallengeTapResolved(tier);
   }
 
-  private resolveChallenge(tier: Tier): void {
+  /**
+   * Ponto único de resolução de um toque/timeout, seja de sweep/ramp/hold.
+   * Trata o caso especial da frenagem em 2 etapas: a 1ª etapa não chama o
+   * core (resolveChallenge) — só guarda o tier e inicia a 2ª etapa.
+   */
+  private onChallengeTapResolved(tier: Tier): void {
     if (!this.challengeActive) return;
     this.challengeActive = false;
     this.challengeTimer?.remove();
-    this.cursorGraphics.clear();
+    this.cursorGraphics?.clear();
 
+    const ev = currentEvent(this.raceState);
+    if (ev.kind === 'frenagem' && this.frenagemStage === 1) {
+      this.advanceFrenagemStage(tier);
+      return;
+    }
+    const finalTier = (ev.kind === 'frenagem' && this.frenagemStage === 2 && this.frenagemStage1Tier)
+      ? combineTiers(this.frenagemStage1Tier, tier)
+      : tier;
+    this.resolveChallenge(finalTier);
+  }
+
+  /** Frenagem, etapa 1 (ponto de frenagem) resolvida — mostra o resultado parcial e inicia a etapa 2 (duração). */
+  private advanceFrenagemStage(tier: Tier): void {
+    this.frenagemStage1Tier = tier;
+    this.frenagemStage = 2;
+    this.clearPanel();
+    this.panel.add(this.add.text(16, 60, `Etapa 1/2 — ${tier.toUpperCase()}. Agora a duração da frenagem...`, {
+      fontSize: '16px', color: '#fff', fontStyle: 'bold',
+    }));
+    this.time.delayedCall(500, () => {
+      const ev = currentEvent(this.raceState);
+      this.startRampChallenge(`${ev.cornerName ?? ''} — duração da frenagem (2/2)`);
+    });
+  }
+
+  private resolveChallenge(tier: Tier): void {
     const ev = currentEvent(this.raceState);
     const challengeId = ev.cornerId ?? (ev.kind === 'pit' ? 'pit' : 'largada');
     const gapBefore = this.raceState.gapToAhead;
     const overtakeAttempt = this.raceState.overtakeAttempt;
     const wasDnf = this.raceState.dnf;
+    // frenagem em 2 etapas: `tier` aqui já é o combinado (combineTiers) — guarda a etapa 1 separada pra telemetria
+    const stage1Tier = ev.kind === 'frenagem' ? this.frenagemStage1Tier ?? undefined : undefined;
 
     const nitroUsed = this.pendingNitro ? tryUseNitro(this.raceState) : false;
     const result = resolveCurrent(this.raceState, tier, { nitroUsed });
@@ -427,6 +611,7 @@ export class RaceScene extends Phaser.Scene {
     trackEvent('challenge_result', {
       trackId: track.id, challengeId, kind: ev.kind, tier, nitroUsed, overtakeAttempt,
       gapBefore, gapAfter: this.raceState.gapToAhead, healthAfter: this.raceState.health,
+      ...(stage1Tier ? { stage1Tier } : {}),
     });
 
     if (result.positionChanged) {

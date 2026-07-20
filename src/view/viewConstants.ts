@@ -15,10 +15,29 @@ export const TRACK_RECT = {
   height: CANVAS_HEIGHT - HUD_HEIGHT - PANEL_HEIGHT,
 };
 
-/** tempo (ms) de uma volta completa do cursor (0 -> 100 -> 0) na barra de timing */
+/** tempo (ms) de uma volta completa do cursor (0 -> 100 -> 0) na barra de timing — usado só no pit (sweep contínuo, T-105 não mudou isso) */
 export const CURSOR_SWEEP_PERIOD_MS = 900;
-/** tempo limite (ms) para apertar o botão antes de contar como "miss" automático */
+/** tempo limite (ms) para apertar o botão antes de contar como "miss" automático — usado só no pit */
 export const CHALLENGE_TIME_LIMIT_MS = 1500;
+
+/**
+ * T-105 (proposta CSR2, validada na demo greybox — ver Claude-Racing.md §2.10):
+ * frenagem e aceleração deixam de usar o vaivém contínuo e passam a ser uma
+ * única passagem (0->100) representando a aproximação/aceleração, não mais
+ * um cursor oscilando indefinidamente.
+ */
+export const RAMP_DURATION_MS = 1300;
+/** centro da zona ideal na aceleração — perto do fim do percurso (limite de grip), não no meio */
+export const ACCEL_CENTER = 75;
+export const BRAKE_CENTER = 50;
+
+/** Largada: agora é "segurar para controlar" a agulha até o sinal, não mais um toque de reação. */
+export const LARGADA_PREP_MS = 1500;
+export const LARGADA_LIGHT_INTERVAL_MS = 500;
+export const LARGADA_HOLD_MIN_MS = 300;
+export const LARGADA_HOLD_MAX_MS = 700;
+export const LARGADA_HOLD_RATE = 0.16; // unidades/ms subindo enquanto segura
+export const LARGADA_FALL_RATE = 0.10; // unidades/ms caindo quando solta
 /** duração da animação dos carros entre eventos (T-104: 0,8–1,2s por trecho) */
 export const TWEEN_DURATION_MS = 1000;
 

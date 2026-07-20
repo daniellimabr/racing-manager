@@ -2,7 +2,7 @@
 
 > Documento vivo mantido pelo agente TechLead-Racing (ver protocolo em Claude-Tech.md, seção 1.1).
 > Anexar junto com CLAUDE.md e Claude-Tech.md em conversas sobre a trilha Racing.
-> Última atualização: 2026-07-20 (sessão 3 — feedback CSR2 traduzido em demo greybox (T-105), roteiro de playtest estruturado montado (T-109/T-110), deploy ainda bloqueado pelo mesmo outage do GitHub)
+> Última atualização: 2026-07-20 (sessão 3, continuação — T-105 implementado de verdade no core/view (não só a demo), balanceamento recalibrado (T-107 rodada 2), PO escolheu o mockup A de HUD (ainda não implementado), deploy continua bloqueado)
 
 ## 1. Status do backlog
 
@@ -18,7 +18,7 @@
 | T-102 Tela de corrida Phaser | ✅ **Feito nesta sessão** | `src/view/` — ver seção 2.3 |
 | T-103 Fluxo completo integrado | ✅ **Feito nesta sessão** | Idem |
 | T-104 Animação entre eventos | ✅ **Feito nesta sessão** | Idem |
-| T-105 (benchmark CSR2) | ⏳ **Feedback recebido e traduzido em demo nesta sessão — falta integrar no core/view** | PO trouxe feedback qualitativo do CSR2; traduzido em parâmetros + demo greybox interativa (`greybox-timing-csr2.html`) para validação visual antes de tocar no core. Ver seção 2.10 |
+| T-105 (benchmark CSR2) | ✅ **Feito nesta sessão (implementado de verdade, não só a demo)** | Demo validada pelo PO → portada pro `core/timing.ts` + `RaceScene.ts`: largada por controle contínuo (segurar), frenagem em 2 etapas combinadas, aceleração com centro deslocado. Ver seção 2.13 |
 | T-109/T-110 (roteiro de playtest) | ⏳ **Roteiro montado nesta sessão** | PO confirmou que o feel pass (T-106) está bom o suficiente para avançar; roteiro estruturado de 3 sessões documentado na seção 2.11. Ainda não executado |
 | T-106 (juice) | ✅ **Feito nesta sessão (parte mecânica)** | Contagem 3-2-1, SFX sintetizado, vibração, flash/shake — ver seção 2.9. Falta o "teste cego com/sem juice" (T-106 é sobre percepção humana, não dá pra validar sozinho) |
 | T-107 Balance pass | ✅ **Rodada 1 feita nesta sessão** | Ver seção 2.4 — **nota:** era a 1ª rodada de verdade, não a 2ª (ver seção 5) |
@@ -204,7 +204,49 @@ PO pediu pra considerar desenhar um mínimo de HUD pra tela de corrida. O HUD at
 
 Cada `.html` é standalone (canvas puro, abre direto no navegador, mesmo padrão dos outros greybox da T-105) com um traçado placeholder (não é Spa de verdade, só pra dar contexto espacial) por trás — o ponto de comparação é só a área do HUD. Renderizado também em `.png` (via Playwright headless, mesmo processo, instalado/removido) pra visualização rápida sem precisar abrir nada.
 
-**Nenhuma escolhida/implementada ainda** — está registrado aqui só como ponto de partida; a decisão de qual direção seguir (ou nenhuma, ficar no atual) é do PO.
+**Decisão do PO (mesma sessão, antes da rodada autônoma):** mockup **A — Texto refinado**. **Ainda não implementado** — não estava no escopo da rodada de ~2h (que priorizou o T-105 real e o balanceamento); fica para uma próxima sessão trocar o `updateHud()` atual pelo layout do mockup A.
+
+### 2.13 T-105 — implementação real (rodada autônoma de ~2h, sem pausar para o PO)
+
+Com a v2 da demo aprovada (seção 2.10.1), portei as 3 mudanças pro jogo de verdade. Trabalho feito sozinho, sem check-in no meio, conforme pedido pelo PO ("não esperar input meu durante estas 2 horas").
+
+**`core/timing.ts`:**
+- `tierFromPosition(pos, halves, center = 50)` — parâmetro novo, com default que preserva 100% do comportamento anterior. Todo o resto do jogo continua chamando sem o 3º argumento.
+- `combineTiers(a, b)`: nova função — combina 2 tiers pela média de uma pontuação interna (roxo 100/verde 70/amber 40/vermelho 10/miss 0) remapeada pro tier mais próximo. Usada tanto pela view (frenagem em 2 etapas) quanto pelo harness de bots (ver abaixo) — **um único lugar de verdade pra essa regra**, em vez de duplicá-la.
+- 9 testes novos cobrindo o `center` deslocado e os casos de `combineTiers` (`tests/timing.test.ts`).
+
+**`src/view/RaceScene.ts` (reescrita da máquina de desafios):**
+- O desafio de timing agora tem 3 "modos" (`challengeMode`): `sweep` (vaivém contínuo — **mantido só pro pit**, fora do escopo do T-105), `ramp` (passagem única 0→100 — frenagem e aceleração) e `hold` (segurar — só largada).
+- `drawZoneBarGraphics()` novo: substitui o desenho antigo das zonas (que só funcionava com centro fixo em 50, um truque de "largura relativa a 50") por bandas aninhadas com bordas absolutas — funciona pra qualquer centro (aceleração usa 75) e **também simplificou o desenho do pit/sweep**, que passou a usar a mesma função.
+- Largada: `startLargadaChallenge()` + `updateLargada()` — segurar sobe a agulha (0,16/ms), soltar desce (0,10/ms), 3 luzes + espera aleatória (300–700ms) antes do sinal, resolução automática no instante exato do sinal (sem toque separado).
+- Frenagem: `advanceFrenagemStage()` — etapa 1 resolvida guarda o tier e entra na etapa 2 automaticamente (sem chamar o core ainda); só no final das 2 etapas chama `resolveCurrent` com o tier combinado. `challenge_result` ganhou um campo opcional `stage1Tier` pra quem for analisar telemetria depois.
+- `onChallengeTapResolved()`: novo ponto único de resolução (toque ou timeout), de onde sweep/ramp/hold e a lógica de estágio da frenagem se ramificam — antes essa lógica estava espalhada entre `handleTap` e o timer de cada desafio.
+- Pit **não mudou de mecânica** (deliberado — fora do que o PO validou na demo).
+
+**`tools/botHarness.ts`:**
+- Frenagem agora sorteia 2 tiers e combina com `combineTiers` (mesma regra da view), em vez de 1 sorteio — senão os bots estariam validando um jogo diferente do que o jogador de verdade experimenta.
+- Removida uma linha de código morto pré-existente (`void tierFromPosition(50, halves)` — computava e descartava, não fazia nada) e as variáveis `scale`/`halves` que só alimentavam ela.
+
+**Verificação:**
+- `npm test`: 44/44 (era 44 antes desta rodada também, com os testes novos substituindo o espaço de testes obsoletos — na prática mesma contagem, cobertura maior).
+- `npx tsc --noEmit`: limpo.
+- `npm run build`: build de produção ok (~366 KB gzip, chunk principal — aviso de tamanho já conhecido, sem mudança).
+- **Smoke test end-to-end via Playwright headless** (instalado/removido, mesmo processo de sempre): rodei o jogo de verdade (`npm run dev`) e cliquei através de largada (segurando o botão), boost, decisão de nitro, e ~8 curvas completas (frenagem em 2 etapas + aceleração) sem nenhum erro de console/exceção. **Achado no processo:** minhas primeiras tentativas de clique erravam os botões — não era bug do jogo, era o meu script de teste não considerar o escalonamento do canvas do Phaser (`Scale.FIT` redimensiona e centra o canvas dentro do viewport; cliques em pixel "cru" da página não correspondem 1:1 às coordenadas internas do jogo). Corrigido lendo o `boundingBox()` real do canvas e convertendo as coordenadas — depois disso, tudo funcionou de primeira, incluindo confirmar visualmente que segurar continuamente empurra a agulha até o fim (posição 100, resultado RUIM) exatamente como esperado do mecanismo.
+
+**Recalibração de balanceamento (T-107, rodada 2) — achado importante:**
+
+Depois de implementar a frenagem em 2 etapas, rodei os bots pra conferir contra as metas da T-107 (rodada 1) e encontrei um desvio grande: Skilled passou a vencer **99%** das corridas (meta: 30–40%) e o Médio foi a **81,8%** de pódio (rodada 1: 5,2%). Causa: combinar 2 sorteios independentes (`combineTiers`) reduz bastante a frequência de resultados vermelho/miss em metade dos eventos da corrida (frenagem) — isso beneficia desproporcionalmente perfis que já raramente tiram vermelho/miss no sorteio individual (Skilled: só 3% de chance por sorteio), porque a chance de os **2** sorteios saírem mal ao mesmo tempo cai muito mais rápido que a chance de pelo menos 1 sair bem.
+
+Recalibrei o único parâmetro de posição do modelo (`POSITION_UNIT_SECONDS`, `core/constants.ts`) de 3,7 → **4,25**, testado empiricamente com o harness (500 corridas/perfil por tentativa, ~1s cada — várias rodadas rápidas). Resultado final:
+
+| Perfil | pos. média | DNF | vitórias | pódio |
+|---|---|---|---|---|
+| Casual | 5.83 | 0.0% | 0.0% | 0.0% |
+| Médio | 3.67 | 0.0% | 0.0% | 32.6% |
+| Skilled | 1.66 | 0.0% | **34.4%** | 100.0% |
+| Temerário | 4.84 | 0.0% | 0.0% | 0.0% |
+
+Skilled voltou pra dentro da meta (30–40%). **Mas isso não ficou perfeito — 2 desvios registrados como pendência na seção 3:** o Médio ficou um pouco melhor que a meta original (pos. média 3,67, meta era 4º–7º) e o DNF caiu a **quase zero em todos os perfis** (a mesma regressão à média que ajuda o Skilled também esvazia boa parte do risco de dano da frenagem). Não forcei um 2º parâmetro pra caçar um ajuste "perfeito" porque o modelo se mostrou **muito sensível** nessa faixa (Skilled foi de 99% pra 1% de vitórias variando `POSITION_UNIT_SECONDS` só de 3,7 pra 4,6) — sem dado de playtest humano real, continuar ajustando às cegas seria só adivinhação com mais decimais.
 
 ## 3. Pendências / decisões ambíguas registradas nesta sessão
 
@@ -212,7 +254,12 @@ Cada `.html` é standalone (canvas puro, abre direto no navegador, mesmo padrão
 - **Posição exibida na HUD/resumo vem do grid (`deriveStandings`), não do `raceState.position` bruto.** São dois sistemas paralelos calculando "posição" (um pro harness headless, rápido; outro pro grid visual, mais rico) que **podem divergir entre si** — não há garantia formal de que concordem sempre, já que são independentes por design (ver seção 2.2). Pra M1 isso é aceitável (a UI só mostra a posição do grid, nunca a do core puro), mas é uma dívida de arquitetura a reavaliar se o Manager (M2) precisar ler `RaceOutput.position` de forma que precise bater exatamente com o que o jogador viu na tela — nesse caso, meça de novo, porque o `RaceOutput.position` atual (usado por `toRaceOutput`) ainda é o do core puro, não o do grid.
 - **`DEFAULT_PIT_CREW_QUALITY = 0.5`** — valor não especificado em nenhum documento, escolhido como ponto médio razoável até o M2 alimentar de verdade via `RaceInput.pitCrew`.
 - **Git não estava de fato inicializado** neste diretório, apesar do CLAUDE.md (seção 3, decisão de 2026-07-19) dizer "repositório inicializado na migração para o Claude Code". Inicializei nesta sessão (commit inicial = baseline do Sprint 1 antes de eu tocar em qualquer coisa) — sinalizando pro CTO corrigir essa entrada em Claude-Tech.md/CLAUDE.md se relevante.
-- **`tierFromPosition` (`core/timing.ts`) tem o centro da zona fixo em 50** — a proposta da aceleração (seção 2.10) precisa de um centro configurável (75) para ser implementada de verdade. Mudança pequena e de baixo risco (todo o resto do jogo continua chamando com centro 50, comportamento idêntico), mas ainda não feita — só a demo isolada (`greybox-timing-csr2.html`) usa isso hoje, fora do core.
+- **~~`tierFromPosition` tem o centro fixo em 50~~ — resolvido nesta sessão** (seção 2.13): ganhou parâmetro `center` opcional, já em uso real pela aceleração (75).
+- **Médio ficou um pouco melhor que a meta original do T-107** (pos. média 3,67; meta era 4º–7º) depois da recalibração da seção 2.13. Desvio pequeno, não corrigido de propósito — ver seção 2.13 pra explicação (modelo sensível, sem dado de playtest pra justificar mais ajuste). Reavaliar quando houver telemetria de jogadores reais (T-109/T-110).
+- **DNF caiu a quase zero em todos os perfis** depois da frenagem em 2 etapas (a regressão à média do `combineTiers` também reduz o dano acumulado, não só o ganho de tempo). O DNF como mecânica de risco pode ter ficado sem "dentes" — só um playtest humano vai dizer se isso é um problema de fato (o jogador pode nem notar, ou pode achar que "nunca dá pra perder de verdade"). Não ajustei `DAMAGE` às cegas por causa disso; registrar pra observar no T-109/T-110.
+- **`POSITION_UNIT_SECONDS` é um parâmetro muito sensível** nesta faixa de valores — variar de 3,7 para 4,6 (só 24%) fez o Skilled ir de 99% pra 1% de vitórias. Isso é uma fragilidade de arquitetura (o "degrau" de `Math.floor(raceProgress / POSITION_UNIT_SECONDS)` combinado com uma corrida de duração fixa cria um limiar quase binário), não só uma questão de calibração — vale um olhar mais estrutural se o Manager (M2) for expor esse tipo de parâmetro pra upgrades de peças (zoneScale), onde pequenas variações não deveriam ter esse efeito de "tudo ou nada".
+- **Largada agora tem um modelo de input diferente de todos os outros desafios** (segurar contínuo, em vez de toque único) — é a única mecânica "de tato" nova no jogo. Vale confirmar no playtest que o jogador entende a diferença sem tutorial explícito (o texto na tela diz "segure", mas não foi testado com humano ainda).
+- **Pit continua com o vaivém contínuo antigo** (não passou pela revisão do T-105) — deliberado, fora do que o PO validou na demo; mantido por escopo, não por avaliação de que está correto/errado.
 
 ## 4. Achado do harness de bots — rodada 0 (herdado da sessão 1, T-004)
 
@@ -248,21 +295,20 @@ Essa é uma mudança de arquitetura no core (`raceState.ts`), não só um ajuste
 
 ## 6. Próximos passos (retomar na próxima sessão)
 
-1. **T-006 — concluir o deploy:** ainda bloqueado pelo mesmo outage do GitHub, reconfirmado no início da sessão 3 (seção 2.7). Verificar de novo se `https://daniellimabr.github.io/racing-manager/` já carrega; se a run manual presa em `queued` tiver expirado, o PO clica "Re-run all jobs" de novo — não precisa de mim pra isso.
-2. **T-105 — validar a demo greybox com o PO:** `greybox-timing-csr2.html` está pronta e verificada tecnicamente (seção 2.10), mas falta o julgamento humano — "a largada/frenagem/aceleração assim parecem certas?". Só depois dessa validação vale portar pro `RaceScene.ts`/`core/timing.ts` de verdade.
-3. **Se a demo for aprovada:** implementar de fato — (a) `tierFromPosition` em `core/timing.ts` ganha um parâmetro `center` opcional (default 50, sem quebrar nenhum uso existente); (b) `RaceScene.ts` troca o `triangleWave` contínuo por uma passagem única (0→100) nos desafios de frenagem/aceleração; (c) largada ganha a fase de preparação + semáforo com espera aleatória. Escrever/ajustar testes de `core/timing.ts` para o novo parâmetro.
-4. **T-109/T-110 — executar o roteiro de playtest** (seção 2.11) com o PO + 2 irmãos, 3 sessões. Recomendo esperar o T-006 fechar antes, pra testar no link publicado.
-5. **Reavaliar `OVERTAKE_GAP_THRESHOLD`** contra a nova escala de `gapToAhead` — feedback já recebido do PO na sessão 2: "overtake parece ok". Considerar resolvido por ora; reabrir só se o playtest (item 4) indicar o contrário.
-6. Se o Manager (M2) for consumir `RaceOutput.position`, revisitar a divergência entre posição do core e posição do grid (seção 3).
-7. Chunk do bundle principal está grande (~365 KB gzip, majoritariamente Phaser) — considerar code-splitting se o load em 4G virar problema real no playtest.
-8. **Traçado de Spa (seção 2.6):** corrigido na sessão 2 com base num mapa real, mas ainda vale conferência humana — a curadoria de onde exatamente cada desafio "pega" no traçado é aproximada.
+1. **T-006 — concluir o deploy:** ainda bloqueado pelo mesmo outage do GitHub, reconfirmado de novo ao longo da sessão 3 (seção 2.7) — a run manual presa em `queued` desde 01:16 UTC ainda não avançou mesmo com o Actions marcado "operational" de novo; uma 4ª tentativa também deu `startup_failure`, sem nenhum job chegando a iniciar. Não precisa de mim — quando o PO puder, tentar "Re-run all jobs" de novo ou um novo push.
+2. **Jogar a implementação real do T-105** (seção 2.13) e confirmar se a sensação bate com a demo aprovada — a mecânica foi portada e verificada tecnicamente (testes, build, smoke test automatizado), mas ninguém jogou a versão de verdade com as mãos ainda.
+3. **Implementar o mockup A de HUD** (seção 2.12) — PO já escolheu, só falta trocar o `updateHud()` atual pelo layout escolhido. Não entrou nesta rodada por escopo/tempo.
+4. **T-109/T-110 — executar o roteiro de playtest** (seção 2.11) com o PO + 2 irmãos, 3 sessões. Ainda mais importante agora: validar de perto os 3 desvios de balanceamento da seção 2.13 (Médio um pouco fácil demais, DNF quase inexistente, sensibilidade do `POSITION_UNIT_SECONDS`) com dado humano real antes de continuar ajustando às cegas.
+5. Se o Manager (M2) for consumir `RaceOutput.position`, revisitar a divergência entre posição do core e posição do grid (seção 3).
+6. Chunk do bundle principal está grande (~365 KB gzip, majoritariamente Phaser) — considerar code-splitting se o load em 4G virar problema real no playtest.
+7. **Traçado de Spa (seção 2.6):** corrigido na sessão 2 com base num mapa real, mas ainda vale conferência humana — a curadoria de onde exatamente cada desafio "pega" no traçado é aproximada.
 
 ## 7. Como rodar
 
 ```
 npm install
-npm test        # 37 testes devem passar
-npm run bots     # relatório de balanceamento (ver seção 2.4)
+npm test        # 44 testes devem passar
+npm run bots     # relatório de balanceamento (ver seção 2.13)
 npm run dev      # jogo local
 ```
 
