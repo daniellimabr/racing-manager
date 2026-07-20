@@ -2,7 +2,7 @@
 
 > Documento vivo mantido pelo agente TechLead-Racing (ver protocolo em Claude-Tech.md, seção 1.1).
 > Anexar junto com CLAUDE.md e Claude-Tech.md em conversas sobre a trilha Racing.
-> Última atualização: 2026-07-19 (sessão 2, 3ª metade — T-006 desbloqueada e feita, T-108 feita, T-106/juice mecânico feito)
+> Última atualização: 2026-07-20 (sessão 2, encerramento — traçado de Spa corrigido com mapa real, deploy pendente de instabilidade do GitHub, seção 6 tem o handoff completo pra próxima sessão)
 
 ## 1. Status do backlog
 
@@ -13,7 +13,7 @@
 | T-003 Pista como dado + render de debug | ✅ **Feito nesta sessão** | schema ganhou `path`/`pitPathIndex`/`pathIndex` (faltava na sessão 1); `track-debug.html` — ver seção 2.1 |
 | T-004 Harness de bots | ✅ Feito | (sessão 1); estendido nesta sessão com métricas de vitória/pódio |
 | T-005 Telemetria (PostHog) | ✅ **Feito nesta sessão** | Wrapper + modo offline + `session_start`/`session_end`/`race_start`/`race_end` — ver seção 2.5 |
-| T-006 Deploy contínuo | ✅ **Feito nesta sessão** | GitHub Pages via Actions — ver seção 2.7. PO criou o repo e liberou "Actions" como fonte do Pages |
+| T-006 Deploy contínuo | ⏳ **Quase — bloqueado por outage do GitHub** | Todo o setup está pronto e correto (workflow, `base` do Vite, repo, Pages configurado); só falta a 1ª publicação completar, travada pelo "partial outage" do GitHub Actions no momento do encerramento desta sessão — ver seção 2.7 |
 | T-101 Simulação de grid (12 carros) | ✅ **Feito nesta sessão** | `src/core/grid.ts` — ver seção 2.2 |
 | T-102 Tela de corrida Phaser | ✅ **Feito nesta sessão** | `src/view/` — ver seção 2.3 |
 | T-103 Fluxo completo integrado | ✅ **Feito nesta sessão** | Idem |
@@ -80,9 +80,15 @@ Bate com todas as metas da seção 5 do Claude-Tech.md: Médio entre 4º-7º ✅
 - **Verificação:** meus próprios testes automatizados (Playwright headless) deram falso negativo — não consegui ver a requisição de captura na rede, mesmo confirmando que (a) o token/host estavam corretos, (b) o SDK inicializava sem erro, (c) a rede alcançava a API do PostHog (testei com uma chamada HTTP direta, fora do browser). Investiguei bastante sem achar a causa exata; provavelmente uma particularidade do Chromium headless de sessão curta, não um bug no código. **O PO confirmou ao vivo no painel do PostHog** (`session_start`, `session_end`, `race_start` aparecendo na aba Activity, com timestamps reais de uma sessão jogada manualmente) — a integração funciona de verdade, só a minha verificação automatizada que não prestava pra esse caso específico.
 - 5 testes novos (`tests/analytics.test.ts`, `tests/fileSink.test.ts`).
 
-### 2.6 Traçado de Spa redesenhado (feedback do PO)
+### 2.6 Traçado de Spa — 2 rodadas de correção (feedback do PO)
 
-O traçado da T-003 (seção 2.1) era só "topologicamente plausível" — uma curva genérica, sem nenhuma tentativa séria de parecer com o circuito real. O PO notou que isso compromete o sentido de testar com um usuário normal (ninguém reconhece Spa-Francorchamps num blob arredondado). Redesenhado com a geometria real do circuito: La Source como hairpin apertado logo após a largada, a reta de Kemmel longa e reta (o trecho mais reconhecível do circuito de verdade, entre Eau Rouge/Raidillon e Les Combes), setor central sinuoso (Bruxelles/Rivage → Pouhon → Fagnes) e um retorno longo por Stavelot → Blanchimont até o Bus Stop. Coordenadas reescalonadas pra usar melhor o quadro 0..1 do desenho. Verificado visualmente no debug (T-003) e na view real do jogo — a silhueta agora é reconhecível.
+O traçado da T-003 (seção 2.1) era só "topologicamente plausível" — uma curva genérica, sem nenhuma tentativa séria de parecer com o circuito real.
+
+**Rodada 1:** redesenhei de memória (La Source hairpin, reta de Kemmel, retorno por Blanchimont). O PO testou e disse que **continuava completamente errado**.
+
+**Rodada 2 (a que ficou):** em vez de confiar na memória, busquei o mapa oficial do circuito (Wikipedia, `Spa-Francorchamps_of_Belgium.svg`) e tracei a topologia de verdade a partir da imagem anotada. Correções principais em relação à rodada 1: **Pouhon é uma curva ampla à direita** (uma volta em U de verdade, não perto da largada como eu tinha desenhado), **Bruxelles é uma ponta isolada e apertada** no lado direito do traçado (não fundida visualmente com o resto), e **Blanchimont é o retorno longo pelo lado esquerdo** de volta até a Bus Stop — não um "kink" curto do lado direito. A ordem dos 9 desafios curados bate com a sequência real do mapa: La Source → Eau Rouge/Raidillon → (reta de Kemmel) → Les Combes → Bruxelles → Pouhon → Fagnes/Campus → Stavelot → (Courbe Paul Frère) → Blanchimont → Bus Stop → largada.
+
+Verificado visualmente no debug (T-003) e na view real do jogo em ambas as rodadas — a rodada 2 é a primeira vez que a silhueta bate com uma referência real, não só com minha própria leitura da rodada anterior. **Lição registrada:** pra geometria "real" (mapas, layouts, formas reconhecíveis), buscar uma referência de verdade em vez de reconstruir de memória — a rodada 1 parecia razoável olhando isolada, e só a comparação direta com a fonte revelou o quão errada estava.
 
 ### 2.7 T-006 — Deploy contínuo (GitHub Pages)
 
@@ -92,7 +98,8 @@ O traçado da T-003 (seção 2.1) era só "topologicamente plausível" — uma c
 - Token do PostHog injetado como env var direto no passo de build do workflow (não fica em arquivo do repo) — é o mesmo project token write-only já documentado como seguro pra expor no client (Claude-Tech.md §3), agora alimentando o build de produção também, não só o `.env` local.
 - **Autenticação do push:** não guardei nenhuma credencial neste ambiente (sem credential helper configurado). O PO gerou 2 tokens fine-grained de curta duração (repo `racing-manager`, permissões Contents + Workflows em "Read and write") e colou no chat pra eu usar só no comando do push — nunca gravados em `.git/config` nem em nenhum arquivo (usados só inline no argumento do comando). Os fine-grained tokens do GitHub exigem a permissão "Workflows" separada de "Contents" pra aceitar mudanças em `.github/workflows/` — na 1ª tentativa faltou essa permissão, corrigido gerando outro token já com as duas.
 - Build de produção verificado localmente antes do push (`npm run build`, ~365 KB gzip no bundle principal — a maior parte é o Phaser; aviso de chunk grande do Vite, não bloqueia nada agora mas vale revisitar se afetar o load em 4G).
-- 1ª run do workflow falhou com `startup_failure` — aconteceu antes do PO trocar a fonte do Pages pra "Actions", não é um problema no workflow em si. Re-disparada manualmente depois.
+- 1ª run do workflow falhou com `startup_failure` — aconteceu antes do PO trocar a fonte do Pages pra "Actions", não é um problema no workflow em si.
+- **Status ao encerrar esta sessão: deploy ainda não completou.** Depois da troca de fonte do Pages, mais 2 tentativas (push automático + disparo manual via `workflow_dispatch`) falharam com a mesma mensagem genérica do GitHub ("An unexpected error has occurred... Errors are sometimes temporary"). Confirmado via `githubstatus.com` que o componente **Actions estava em "partial outage"** no momento (2026-07-20, ~00:49 UTC) — não é problema de configuração do repo nem do workflow. **Próximo passo, sem precisar de mim:** quando o Actions do GitHub voltar ao normal, o PO clica em "Re-run all jobs" na run mais recente (ou "Run workflow" de novo) e deve completar. Não requer nenhuma mudança de código.
 
 ### 2.8 T-108 — Telemetria completa (eventos v1)
 
@@ -160,12 +167,13 @@ Essa é uma mudança de arquitetura no core (`raceState.ts`), não só um ajuste
 
 ## 6. Próximos passos (retomar na próxima sessão)
 
-1. **T-105 (benchmark CSR2):** aguardando o PO instalar o jogo de referência e trazer feedback — é a única peça do feel pass que só um humano faz.
-2. **Reavaliar `OVERTAKE_GAP_THRESHOLD`** contra a nova escala de `gapToAhead` num playtest humano (seção 5) — é exatamente o item 2 que o PO perguntou como testar: **basta abrir o link do GitHub Pages (ou `npm run dev` local, dá no mesmo) e jogar normalmente**, prestando atenção em quando a opção "Tentar ultrapassagem" aparece — se está aparecendo raro demais (gap raramente fica <1s) ou tarde demais (só perto do fim de cada "trecho" entre posições), o threshold ou a escala precisam de ajuste.
-3. Curadoria de pontos do traçado (seção 2.6) é uma aproximação de memória, não um traçado GPS real — o PO vai avaliar isso na próxima run humana (confirmado).
+1. **T-006 — concluir o deploy:** só falta o Actions do GitHub sair do "partial outage" e o PO clicar em "Re-run all jobs" (seção 2.7). Confirmar que `https://daniellimabr.github.io/racing-manager/` carrega o jogo de verdade antes de considerar o T-006 100% fechado (o build local já foi validado, só falta a publicação em si).
+2. **T-105 (benchmark CSR2):** aguardando o PO instalar o jogo de referência e trazer feedback — é a única peça do feel pass que só um humano faz.
+3. **Reavaliar `OVERTAKE_GAP_THRESHOLD`** contra a nova escala de `gapToAhead` — feedback já recebido do PO nesta sessão: "overtake parece ok". Considerar resolvido por ora; reabrir só se um playtest mais longo (T-109/T-110) indicar o contrário.
 4. Se o Manager (M2) for consumir `RaceOutput.position`, revisitar a divergência entre posição do core e posição do grid (seção 3).
-5. **T-109/T-110:** playtest estruturado (PO + irmãos) — bloqueia no Gate 1, é o próximo marco depois que o feel pass fechar.
+5. **T-109/T-110:** playtest estruturado (PO + irmãos) — bloqueia no Gate 1, é o próximo marco depois que o feel pass (T-105) fechar.
 6. Chunk do bundle principal está grande (~365 KB gzip, majoritariamente Phaser) — considerar code-splitting se o load em 4G virar problema real no playtest.
+7. **Traçado de Spa (seção 2.6):** corrigido nesta sessão com base num mapa real, mas ainda vale conferência humana — a curadoria de onde exatamente cada desafio "pega" no traçado é aproximada.
 
 ## 7. Como rodar
 
@@ -173,7 +181,11 @@ Essa é uma mudança de arquitetura no core (`raceState.ts`), não só um ajuste
 npm install
 npm test        # 37 testes devem passar
 npm run bots     # relatório de balanceamento (ver seção 2.4)
-npm run dev      # abre http://localhost:5173/index.html (jogo) e /track-debug.html (debug do traçado)
+npm run dev      # jogo local
 ```
 
+**Atenção ao `base` do Vite (T-006):** desde que `vite.config.ts` ganhou `base: '/racing-manager/'` (pra bater com o GitHub Pages), o dev server serve tudo sob esse prefixo — a URL fica `http://localhost:5173/racing-manager/index.html` (ou `/racing-manager/track-debug.html`), não mais na raiz. Se a porta 5173 já estiver ocupada, o Vite sobe na próxima livre (5174, etc.) — confira o terminal do `npm run dev` pra saber a URL exata.
+
 Telemetria real (PostHog) precisa de um `.env` com `VITE_POSTHOG_KEY` (ver `.env.example`; token no Claude-Tech.md §3). Sem isso, fica em modo offline (console).
+
+**Deploy publicado (quando o T-006 fechar de vez):** `https://daniellimabr.github.io/racing-manager/`
