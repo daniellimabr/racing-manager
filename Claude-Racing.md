@@ -2,7 +2,7 @@
 
 > Documento vivo mantido pelo agente TechLead-Racing (ver protocolo em Claude-Tech.md, seção 1.1).
 > Anexar junto com CLAUDE.md e Claude-Tech.md em conversas sobre a trilha Racing.
-> Última atualização: 2026-07-20 (sessão 3, encerramento — T-105 implementado de verdade no core/view, balanceamento recalibrado (T-107 rodada 2), PO escolheu o mockup A de HUD (ainda não implementado), deploy fechado e publicado com tudo desta sessão, GCM configurado para push futuro sem precisar pedir token de novo)
+> Última atualização: 2026-07-20 (sessão 3, encerramento — T-105 implementado de verdade no core/view, balanceamento recalibrado (T-107 rodada 2), PO escolheu o mockup A de HUD (ainda não implementado), deploy fechado e publicado com tudo desta sessão, `git push` funcionando direto do sandbox do agente — ver seção 2.7)
 
 ## 1. Status do backlog
 
