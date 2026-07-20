@@ -248,6 +248,22 @@ Recalibrei o único parâmetro de posição do modelo (`POSITION_UNIT_SECONDS`, 
 
 Skilled voltou pra dentro da meta (30–40%). **Mas isso não ficou perfeito — 2 desvios registrados como pendência na seção 3:** o Médio ficou um pouco melhor que a meta original (pos. média 3,67, meta era 4º–7º) e o DNF caiu a **quase zero em todos os perfis** (a mesma regressão à média que ajuda o Skilled também esvazia boa parte do risco de dano da frenagem). Não forcei um 2º parâmetro pra caçar um ajuste "perfeito" porque o modelo se mostrou **muito sensível** nessa faixa (Skilled foi de 99% pra 1% de vitórias variando `POSITION_UNIT_SECONDS` só de 3,7 pra 4,6) — sem dado de playtest humano real, continuar ajustando às cegas seria só adivinhação com mais decimais.
 
+### 2.14 Decisão de design (PO) — roxo também desgasta a saúde do carro
+
+**Decisão do PO, registrada nesta sessão — implementação ainda NÃO feita, timing fica a critério do CTO:**
+
+Acertar a zona roxa (perfeita) passa a consumir uma pequena fatia de saúde do carro, não só amber/vermelho/miss como hoje. Motivo (nas palavras do PO): correr no limite pra acertar o timing perfeito também desgasta o carro — não é só erro que causa dano. Isso cria uma tensão de gestão de recurso mesmo jogando bem: o jogador não pode simplesmente buscar roxo sempre, sem custo. O pit stop pode recuperar parte dessa saúde, mas só se o jogador tiver escolhido um boost de recuperação antes.
+
+**Conexão com o que já existe:** o CLAUDE.md §6.1 já lista o boost "**Reparo rápido**: recupera uma fatia de saúde do carro" como conceito aprovado — é um dos 5 boosts do CLAUDE.md que nunca foram implementados no core (ver pendência abaixo). Essa decisão nova dá a esse boost um motivo mais forte de existir (hoje a saúde só desce por erro; com essa mudança, desce sempre, então um boost de recuperação passa a ser genuinely útil mesmo pra quem não está errando).
+
+**Implicações técnicas (pra quando for implementado):**
+- `DAMAGE` (`core/constants.ts`) ganharia um valor > 0 para `purple` (hoje é 0) — valor exato é uma questão de balanceamento, não de design (precisa rodar o harness de novo depois).
+- Precisa implementar o boost "reparo rápido" no core (`BoostId`, hoje só tem `'pneu' | 'freio' | 'janela'`) e a lógica de recuperação no pit stop condicionada a esse boost estar ativo.
+- Interage direto com a recalibração de DNF da seção 2.13 (DNF caiu a quase zero nesta sessão) — desgastar saúde mesmo no roxo devolve uma fonte de risco que a mudança da frenagem tinha esvaziado. Vale medir os dois efeitos juntos no próximo balance pass, não isoladamente.
+- **→ impacta CLAUDE.md:** é uma decisão de design nova (não estava na tabela §3 nem no glossário §8, que hoje diz "roxo = perfeita" sem nenhuma nota de desgaste). Sinalizando pro CTO propagar pro CLAUDE.md/Claude-Tech.md na revisão do sprint, conforme o protocolo (Claude-Tech.md §1.1).
+
+**Não implementado nesta sessão** — o PO foi explícito que o CTO decide quando isso entra no código.
+
 ## 3. Pendências / decisões ambíguas registradas nesta sessão
 
 - **Boost: só 3 dos 8 conceitos do CLAUDE.md §6.1 estão implementados no core** (`pneu`/`freio`/`janela`; faltam nitro extra, rasante, reparo rápido, fôlego de ultrapassagem, recuperação de erro). Isso já era assim desde o T-002, não é uma regressão desta sessão — só nunca tinha sido registrado. A view oferece as 3 disponíveis a cada boost elegível. Decisão de qual conjunto priorizar pro M1 fica para o CTO/PO.
