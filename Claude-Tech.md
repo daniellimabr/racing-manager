@@ -3,7 +3,7 @@
 > Documento companheiro do CLAUDE.md (design/PO) e do Claude-Marketing.md (produto/mercado/CPO). Este arquivo é o repositório de engenharia: decisões técnicas, arquitetura, organização das trilhas/agentes, telemetria, bots testadores e backlog priorizado.
 > Dono: CTO (agente). Anexar em toda conversa/tarefa de desenvolvimento (Claude Code/Cowork).
 > Ao decidir algo técnico, registrar aqui com data. Ao concluir tarefa, marcar status.
-> Última atualização: 2026-07-19 (rodada 5 — conta PostHog criada e credenciais registradas, T-005 desbloqueada)
+> Última atualização: 2026-07-20 (rodada 6 — backlog sincronizado com o estado real da trilha Racing, muito à frente do que esta rodada refletia: M1 praticamente completo, faltando só o playtest humano T-109/T-110. Ver Claude-Racing.md para o detalhe sessão a sessão)
 
 ## 1. Organização do time (humanos + agentes)
 
@@ -63,7 +63,7 @@ Cada agente é dono de um documento e o mantém atualizado **sozinho**, sem que 
 | 2026-07-19 | **Telemetria: PostHog (tier gratuito)** atrás de um wrapper próprio (`analytics.ts`) para permitir troca de fornecedor sem dor. Modo offline: eventos logados em arquivo local (mesmo formato) — usado também pelos bots |
 | 2026-07-19 | **Conta PostHog criada pelo PO.** Project token (write-only, seguro para expor no client): `phc_rVnVUkBRjhXiEesYFbuYnXzbb76UQyfPthD9wXT9zMdV` · Project ID: `519550` · Região: US Cloud → API Host `https://us.i.posthog.com`. Produto habilitado: só Product Analytics (Web Analytics, Session Replay, Error Tracking etc. deliberadamente deixados de fora por ora). Desbloqueia a T-005 — o `analytics.ts` deve ler o token de uma env var (`VITE_POSTHOG_KEY`), não hardcoded, mesmo sendo uma chave "segura para público" |
 | 2026-07-19 | **Deploy contínuo** em hospedagem estática gratuita (Vercel/Netlify/GitHub Pages — TechLead escolhe na T-006), com um link fixo de "última versão" para o PO e testers |
-| 2026-07-19 | **Git:** repositório inicializado na migração para o Claude Code. Agentes operam o repo; o PO não precisa tocar em git (sessões pelo celular = decisão/revisão via conversa) |
+| 2026-07-19 | **Git:** repositório inicializado na migração para o Claude Code. Agentes operam o repo; o PO não precisa tocar em git (sessões pelo celular = decisão/revisão via conversa). **Correção (2026-07-20):** o repositório não estava de fato inicializado nesta data — foi inicializado de fato na sessão 1 da trilha Racing (ver Claude-Racing.md §3), o commit inicial já é a baseline do Sprint 1 |
 | 2026-07-19 | **Reavaliação de engine no Gate 1→M2:** caminho A (provável) — manter web e empacotar com Capacitor para as lojas; caminho B — portar a view para Godot/Unity se performance ou feel exigirem. O core em TS puro protege o investimento nos dois caminhos |
 | 2026-07-19 | **Alvo de performance:** Android de entrada (~2 GB RAM, Chrome), 60 fps na tela de corrida, load < 5 s em 4G. Herdado do soft launch Brasil (Claude-Marketing.md) |
 | 2026-07-19 | **pt-BR nativo**, com strings centralizadas desde o início (i18n barato agora, caro depois) |
@@ -137,41 +137,58 @@ Proposta do CTO para a T-003, sujeita a ajuste do TechLead/PO:
 
 ### Sprint 1 — M0 Fundação (TechLead-Racing)
 
-**Status (2026-07-19): T-001 a T-004 concluídos numa sessão pelo celular, sem IDE — detalhes e um achado de balanceamento importante em `Claude-Racing.md`. T-005/T-006 pendentes (precisam de contas externas, melhor feitas com sessão completa).**
+**Status (2026-07-20): todo o Sprint 1 concluído.** T-001/T-002 na sessão 1; T-003/T-004/T-005/T-006 fechados na sessão 3 da trilha Racing. Detalhe técnico completo em `Claude-Racing.md` (não duplicado aqui, conforme protocolo §1.1).
 
 | ID | Tarefa | Critério de aceite |
 |---|---|---|
 | T-001 | ✅ Estrutura do projeto: Vite + TS + Phaser; pastas `core/`, `view/`, `tracks/`, `tools/`; lint básico | `npm run dev` sobe; canvas retrato vazio renderiza no celular |
-| T-002 | ✅ Extrair o core do greybox para TS puro: estado da corrida, zonas/tiers, gap, dano/saúde, nitro, pit, DNF/revive — com testes unitários | Suíte de testes roda sem browser (22 testes, vitest); paridade de comportamento com o greybox v2 |
-| T-003 | ⏳ Formato de pista (schema JSON) + `tracks/spa.json` com a curadoria da seção 6; render de debug do traçado | Schema validado ✅; traçado de Spa desenhado na tela com os 9 pontos de desafio marcados — **pendente**, precisa de canvas |
-| T-004 | ✅ Harness de bots v1 (CLI): N corridas × perfil → relatório (DNF, posições, duração, curvas assassinas) | 1.000 corridas < 10 s ✅ (500 em <1s); relatório gerado ✅ — **revelou DNF de 56–100% com as constantes atuais, ver Claude-Racing.md seção 3** |
-| T-005 | Telemetria: PostHog + modo offline | Pendente — depende de conta PostHog do PO |
-| T-006 | Deploy contínuo + link fixo | Pendente — depende de conta de hospedagem do PO |
+| T-002 | ✅ Extrair o core do greybox para TS puro: estado da corrida, zonas/tiers, gap, dano/saúde, nitro, pit, DNF/revive — com testes unitários | Suíte de testes roda sem browser (49 testes, vitest, sessão 5); paridade de comportamento com o greybox v2 |
+| T-003 | ✅ Formato de pista (schema JSON) + `tracks/spa.json` com a curadoria da seção 6; render de debug do traçado | Schema validado; traçado de Spa redesenhado 2x a partir de mapa real (`track-debug.html`), 9 pontos de desafio marcados |
+| T-004 | ✅ Harness de bots v1 (CLI): N corridas × perfil → relatório (DNF, posições, duração, curvas assassinas) | 500 corridas/perfil; relatório com DNF/posição/vitória/pódio/curvas assassinas |
+| T-005 | ✅ Telemetria: PostHog + modo offline | `analytics.ts` (wrapper) + `.env`/`VITE_POSTHOG_KEY`; confirmado recebendo eventos reais no painel do PostHog |
+| T-006 | ✅ Deploy contínuo + link fixo | `https://daniellimabr.github.io/racing-manager/` publicado, GitHub Actions a cada push na `main` |
 
 ### Sprint 2 — M1 Corrida em Spa com grid completo
 
+**Status: ✅ concluído (sessão 4 da trilha Racing).**
+
 | ID | Tarefa | Critério de aceite |
 |---|---|---|
-| T-101 | Simulação do grid: 12 carros (2 do jogador + 10 IA), pace por carro/equipe, gaps entre todos, posições derivadas; desafio focado no carro da frente | Posições consistentes ao longo da prova; ultrapassagens entre IAs acontecem; live-timing de todos disponível no estado |
-| T-102 | Tela de corrida: Spa inteiro visível, ícones escalonados conforme Q12 (jogador maior; P1–P3 destacados; demais pequenos), HUD com posição/volta/saúde/gap | Legível em tela de 5–6 pol.; 60 fps em Android de entrada |
-| T-103 | Fluxo completo integrado ao core: saída → frenagem (decisão de ultrapassagem com gap < 1 s antes de cada frenagem de curva); boost 1x por volta (na saída da reta principal); pit obrigatório na volta 4; DNF/revive; resumo | Corrida completa de ponta a ponta sem erro; regras batem com o CLAUDE.md |
-| T-104 | Animações entre eventos: carros percorrendo o traçado real, gap animando (0,8–1,2 s por trecho) | Sensação de corrida contínua; sem "teleporte" de ícones |
+| T-101 | ✅ Simulação do grid: 12 carros (2 do jogador + 10 IA), pace por carro/equipe, gaps entre todos, posições derivadas; desafio focado no carro da frente | `src/core/grid.ts` — posições consistentes; ultrapassagens entre IAs acontecem; live-timing de todos disponível no estado. **Dívida registrada:** posição do grid e posição do core (`raceState.position`) são calculadas em paralelo e podem divergir (Claude-Racing.md §3) — aceitável para M1, reavaliar se o M2 precisar ler `RaceOutput.position` batendo com o que o jogador viu |
+| T-102 | ✅ Tela de corrida: Spa inteiro visível, ícones escalonados conforme Q12 (jogador maior; P1–P3 destacados; demais pequenos), HUD com posição/volta/saúde/gap | HUD reformulado no mockup A (texto refinado) na sessão 4 |
+| T-103 | ✅ Fluxo completo integrado ao core: saída → frenagem (decisão de ultrapassagem com gap < 1 s antes de cada frenagem de curva); boost 1x por volta (na saída da reta principal); pit obrigatório na volta 4 (Spa: volta 4 de 8); DNF/revive; resumo | Corrida completa de ponta a ponta verificada (145 eventos, sem erro) |
+| T-104 | ✅ Animações entre eventos: carros percorrendo o traçado real, gap animando (0,8–1,2 s por trecho — implementado com 1s fixo) | Sem "teleporte" de ícones, verificado via Playwright headless |
 
 ### Sprint 3 — M1 Feel e calibração
 
+**Status: ✅ concluído (sessões 3–5 da trilha Racing).**
+
 | ID | Tarefa | Critério de aceite |
 |---|---|---|
-| T-105 | Benchmark CSR2: roteiro de 15 min para PO + irmãos (o que observar no timing de troca de marcha); tradução em parâmetros da barra (curva de velocidade do cursor, tempo-limite por dificuldade, antecipação visual) | Documento curto de achados + parâmetros ajustados no core |
-| T-106 | Juice: vibração (Vibration API — Android; iOS web não suporta, compensar com áudio/visual), SFX gratuitos (largada, perfeito, batida), flash/shake leves, contagem 3-2-1 na largada | Perceptível em teste cego "com/sem juice" |
-| T-107 | Balance pass 1 via harness: calibrar GAIN por tier, dano, escala de zonas e pace das IAs contra as metas da seção 5 (**ponto de partida: DNF de 56–100% encontrado na sessão do Sprint 1, ver Claude-Racing.md**) | Relatório dos bots dentro das metas; parâmetros versionados |
-| T-108 | Telemetria integrada em todos os eventos v1 + tela de fim com nota 1–5 | Funil completo visível no PostHog em um teste real |
+| T-105 | ✅ Benchmark CSR2 traduzido em parâmetros (largada = segurar contínuo, frenagem = 2 etapas combinadas, aceleração = centro deslocado a 75) + implementado de verdade no core/view (não só demo) + confirmado pelo PO jogando a versão real (sessão 4) | `core/timing.ts` (`tierFromPosition` com `center`, `combineTiers`), `RaceScene.ts` reescrito |
+| T-106 | ✅ Juice: vibração, SFX sintetizado (Web Audio, sem assets baixados), flash/shake, contagem 3-2-1 | Parte mecânica feita; teste cego formal (percepção humana) ainda não rodado — fica para o T-110 |
+| T-107 | ✅ Balance pass via harness (2 rodadas) — calibrado `DAMAGE` e `POSITION_UNIT_SECONDS` (3.7→4.25) contra as metas da seção 5 | Metas batidas: Skilled vence 30–40%, Médio 4º–7º (ligeiramente melhor que a meta), Casual ≥70%. **Pendência registrada:** DNF caiu a quase zero em todos os perfis — só um playtest humano dirá se isso tirou "os dentes" do risco de dano (Claude-Racing.md §3) |
+| T-108 | ✅ Telemetria integrada em todos os eventos v1 (`challenge_result`, `boost_chosen`, `overtake`, `dnf`, `revive_decision`, `race_end`) + tela de fim com nota 1–5 (`feedback_score`) | Funil completo, confirmado recebendo dados reais no PostHog |
 
 ### Sprint 4 — M1 Gate 1
 
+**Status: roteiro pronto, execução pendente — depende do PO agendar.**
+
 | ID | Tarefa | Critério de aceite |
 |---|---|---|
-| T-109 | Correções e polimentos do playtest interno do PO | Lista de bugs do PO zerada ou triada |
-| T-110 | Playtest estruturado: 3 sessões (PO + 2 irmãos), roteiro + coleta de telemetria + nota | Relatório Gate 1 (CTO + CPO): funil, notas, recomendação go/no-go para M2 |
+| T-109 | Correções e polimentos do playtest interno do PO | Ainda sem lista de bugs — nenhum playtest informal reportado até 2026-07-20 |
+| T-110 | ⏳ Playtest estruturado: 3 sessões (PO + 2 irmãos), roteiro + coleta de telemetria + nota | Roteiro detalhado pronto em Claude-Racing.md §2.11 (contexto de 30s, 2–3 corridas sem interferência, perguntas pós-corrida). **Próximo passo real do projeto** — não executado ainda |
+
+### Sessão 5 (2026-07-20) — trabalho autônomo adicional, fora da numeração T- original
+
+Rodada de ~2h sem check-in, autorizada pelo PO. Detalhe técnico completo em Claude-Racing.md; resumo aqui por coerência do backlog:
+
+- Implementada a decisão de design "roxo também desgasta a saúde do carro" (CLAUDE.md §3, 2026-07-20) — `DAMAGE.purple` 0→2, boost "Reparo rápido" implementado (cura na próxima frenagem/pit).
+- Implementados os boosts "Nitro extra" (concede carga na hora) e "Recuperação de erro" (alivia a perda de tempo do próximo erro) — de 3/8 para 6/8 conceitos do CLAUDE.md §6.1 agora no core. Restam "Rasante" e "Fôlego de ultrapassagem".
+- Corrigido bug real: o boost "Janela ampliada" estava na lista desde o Sprint 2 mas não tinha nenhum efeito implementado — jogador que escolhia, não ganhava nada.
+- Boost "Pneu novo" renomeado para "Temperatura de pneu ideal" a pedido do PO (não há troca física de pneu na mecânica).
+- Bundle: Phaser separado em chunk próprio (`manualChunks`) — melhora cache entre deploys futuros; tamanho total da 1ª visita não muda (~367 KB gzip, Phaser é a maior parte, sem mudança de biblioteca considerada nesta rodada).
+- 49/49 testes passando (5 novos), `tsc --noEmit` limpo, `npm run build` ok, smoke test Playwright headless (~180 cliques, ~100s de corrida automatizada) sem erros de console.
 
 ### M2 — Épicos (detalhamento de tarefas após o Gate 1)
 
@@ -198,6 +215,6 @@ E-301 Sede/escritórios (produção passiva + coleta) · E-302 Pilotos e equipe/
 
 ## 11. Próximos passos imediatos
 
-1. PO aprova este plano (ou ajusta) e responde as 2 confirmações pendentes.
-2. Migração para Claude Code/Cowork: init do repositório, anexar os 3 documentos, executar o Sprint 1 (M0) com o TechLead-Racing.
-3. CPO em paralelo: fake-ad e deep-dive de CSR2 (o deep-dive alimenta a T-105).
+1. **T-109/T-110 — executar o roteiro de playtest** (Claude-Racing.md §2.11) com o PO + 2 irmãos. É o item que efetivamente falta para o Gate 1 — todo o resto do M1 já está implementado e publicado.
+2. Validar com dado humano real os desvios de balanceamento já registrados (DNF quase inexistente, Médio ligeiramente acima da meta, sensibilidade de `POSITION_UNIT_SECONDS`) antes de qualquer novo ajuste às cegas via harness.
+3. Após o Gate 1: iniciar o detalhamento das tarefas de M2 (E-201 a E-206, seção 8).

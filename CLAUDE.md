@@ -3,7 +3,7 @@
 > Documento vivo de contexto do projeto. Anexar no início de novas conversas/tarefas.
 > Ao decidir algo, mover o item de "Questões em aberto" para "Decisões" com a data.
 > Documentos companheiros: Claude-Marketing.md (produto/mercado, CPO) e Claude-Tech.md (engenharia/backlog, CTO). Cada agente de trilha (TechLead-Racing, TechLead-Manager) mantém seu próprio Claude-Racing.md / Claude-Manager.md — ver protocolo na seção 1.1 do Claude-Tech.md.
-> Última atualização: 2026-07-19 (rodada 6 — grid confirmado em 12 carros, boost confirmado 1/volta, protocolo de documentação viva por agente)
+> Última atualização: 2026-07-20 (rodada 7 — decisão "roxo também desgasta a saúde" implementada no core; boosts "reparo rápido", "nitro extra" e "recuperação de erro" implementados (6 de 8 conceitos do §6.1 agora no core); boost "pneu novo" renomeado para refletir o efeito de verdade)
 
 ## 1. Visão
 
@@ -56,6 +56,8 @@ Fantasia do jogador: ser o dono/gestor de uma equipe de corrida — e também o 
 | 2026-07-18 | **Q6 — Boosts por volta:** lista da seção 6.1 (nitro extra, pneu novo/grip, freio reforçado, rasante/slipstream, reparo rápido, fôlego de ultrapassagem, janela ampliada, recuperação de erro) aprovada como ponto de partida |
 | 2026-07-18 | **Q10 — Economia (aprovado):** Energia — teto de **30** (superável só via prêmio de slot), custo de **5 por corrida**, recarga por tempo/anúncio/gemas ao estilo Archero (valor exato de regen a definir). Moeda soft = **Gold**. Moeda premium = **Aura**. Baús de peças e fusão 3→1 confirmados como no Archero. Reparo/revive: carro volta com HP cheio após DNF, custa Aura ou anúncio. Passe de Temporada e estratégia de monetização: **adiados para muito mais à frente no projeto** — não detalhar agora |
 | 2026-07-18 | **Extra — Cargos contratáveis da equipe:** 2º piloto, engenheiro de corrida (racing engineer), chefe de mecânicos (lead mechanic), equipe de pit stop, equipe de marketing. Um de cada por time |
+| 2026-07-20 | **Roxo também desgasta a saúde do carro:** acertar a zona perfeita (roxa) agora consome uma pequena fatia de saúde do carro, não só os erros — correr no limite tem custo, mesmo pilotando bem. O boost "Reparo rápido" (§6.1) recupera saúde na próxima frenagem/pit para compensar essa tensão. Implementado e calibrado via harness nesta rodada (ver Claude-Racing.md) |
+| 2026-07-20 | **Boost "Pneu novo" renomeado:** não há troca física de pneu na mecânica (só melhora a zona de acerto por 1 evento) — renomeado para **"Temperatura de pneu ideal"** para não sugerir um pit stop. Efeito inalterado |
 
 ## 4. Mapeamento Archero → Racing Manager (referência de design)
 
@@ -98,16 +100,16 @@ Nenhuma pergunta estrutural em aberto no momento. Pendências de **conteúdo/det
 
 ### 6.1 Boosts por volta (aprovado como ponto de partida)
 
-Cada saída (largada, saída de curva, saída dos boxes) oferece 1 de 3 opções aleatórias, efeito válido só para a corrida atual:
+Cada saída elegível (largada, última saída de cada volta) oferece 1 de 3 opções sorteadas de uma lista de 6/8, efeito válido só para a corrida atual. **Status de implementação no core, atualizado na rodada 7 (ver Claude-Racing.md para detalhe técnico):**
 
-- **Nitro extra**: +1 carga de nitro disponível
-- **Pneu novo (grip)**: aumenta a zona "verde/roxa" de precisão nas próximas 3 curvas
-- **Freio reforçado**: reduz a chance de travar/perder tempo ao errar a frenagem
-- **Rasante (slipstream)**: ganho de velocidade automático se estiver colado no carro da frente por X segundos
-- **Reparo rápido**: recupera uma fatia de saúde do carro
-- **Fôlego de ultrapassagem**: +% de sucesso em tentativas de ultrapassagem pelas próximas 2 curvas
-- **Janela ampliada**: aumenta o tempo disponível para acertar o timing nas próximas curvas
-- **Recuperação de erro**: a próxima curva errada perde menos tempo que o normal
+- **Nitro extra** ✅ implementado: +1 carga de nitro disponível, concedida na hora (não fica pendente para o próximo evento como os demais)
+- **Temperatura de pneu ideal** ✅ implementado (renomeado nesta rodada — não há troca física de pneu): aumenta a zona "verde/roxa" de precisão na próxima frenagem/pit (simplificação da versão "próximas 3 curvas" original — vale reavaliar após playtest se o efeito de 1 evento só for curto demais)
+- **Freio reforçado** ✅ implementado: reduz o dano ao errar a próxima frenagem/pit
+- **Reparo rápido** ✅ implementado: recupera uma fatia de saúde na próxima frenagem/pit resolvida
+- **Janela ampliada** ✅ implementado nesta rodada (estava na lista desde a rodada 6 mas sem nenhum efeito real no código — bug corrigido): aumenta o tempo disponível para acertar o timing na próxima frenagem/pit
+- **Recuperação de erro** ✅ implementado: reduz a perda de tempo do próximo erro (vermelho/miss) numa frenagem/pit
+- **Rasante (slipstream)** ⏳ ainda não implementado no core
+- **Fôlego de ultrapassagem** ⏳ ainda não implementado no core
 
 ### 6.2 Economia (aprovada)
 
@@ -134,7 +136,7 @@ Cada saída (largada, saída de curva, saída dos boxes) oferece 1 de 3 opções
 - **Boost**: melhoria temporária escolhida a cada saída; vale só para a corrida atual.
 - **Zona de timing**: faixa (vermelha/amarela/verde/roxa) usada para medir a precisão do input em cada saída/frenagem; roxa = perfeita. Tamanho das zonas evolui com upgrade de peças.
 - **Nitro**: especial usável junto da aceleração ou frenagem; na frenagem durante ultrapassagem, aumenta taxa de sucesso da manobra + da curva.
-- **Saúde do carro**: recurso que se esgota com erros de pilotagem (acelerar demais, ir para a brita, batidas); ao zerar, causa DNF. Reseta a cada corrida.
+- **Saúde do carro**: recurso que se esgota com erros de pilotagem (acelerar demais, ir para a brita, batidas) **e também, em menor grau, ao acertar a zona roxa** (correr no limite desgasta o carro mesmo pilotando bem — decisão de 2026-07-20, §3); ao zerar, causa DNF. Reseta a cada corrida.
 - **DNF**: did not finish — corrida encerrada por batida forte ou saúde zerada.
 - **Reparo/revive**: opção de voltar à prova após DNF com HP cheio, via Aura ou anúncio.
 - **Autorama**: pilotagem em mapa 2D visto de cima, circuito inteiro visível, ícone do carro na pista, desafios de timing em saídas e frenagens.

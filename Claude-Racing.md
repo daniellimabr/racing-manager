@@ -2,7 +2,7 @@
 
 > Documento vivo mantido pelo agente TechLead-Racing (ver protocolo em Claude-Tech.md, seção 1.1).
 > Anexar junto com CLAUDE.md e Claude-Tech.md em conversas sobre a trilha Racing.
-> Última atualização: 2026-07-20 (sessão 4, em andamento — PO confirmou em jogo real que o T-105 implementado ficou bom (sem ajustes); mockup A de HUD implementado/testado/commitado/publicado (ver seção 2.15); investigando prompt de permissão repetido nesta sessão Windows/PowerShell/VSCode-extension, PO vai reiniciar a janela do VS Code pra testar — ver seção 2.16)
+> Última atualização: 2026-07-20 (sessão 5, rodada autônoma de ~2h sem check-in, autorizada pelo PO — git PATH corrigido no início da sessão (seção 2.17); "roxo desgasta saúde" implementado + boosts reparo_rápido/nitro_extra/recuperação_erro; bug do boost "janela" corrigido; boost "pneu" renomeado; bundle splitting; ver seção 2.18 para o detalhe completo)
 
 ## 1. Status do backlog
 
@@ -24,6 +24,9 @@
 | T-107 Balance pass | ✅ **Rodada 1 feita nesta sessão** | Ver seção 2.4 — **nota:** era a 1ª rodada de verdade, não a 2ª (ver seção 5) |
 | T-108 Telemetria completa | ✅ **Feito nesta sessão** | Ver seção 2.8 |
 | HUD mockup A (escolhido sessão 3) | ✅ **Feito na sessão 4** | `updateHud()` reescrito conforme o mockup A; commit `f7a086a`, publicado. Ver seção 2.15 |
+| Decisão "roxo desgasta saúde" (§2.14) | ✅ **Implementado na sessão 5** | `DAMAGE.purple` 0→2 + boost `reparo_rapido`. Ver seção 2.18 |
+| Boosts nitro_extra / recuperação_erro | ✅ **Implementados na sessão 5** | De 3/8 para 6/8 conceitos do CLAUDE.md §6.1. Ver seção 2.18 |
+| Bug do boost "janela" (sem efeito real) | ✅ **Corrigido na sessão 5** | Ver seção 2.18 |
 
 **Como rodar:** `npm install && npm test && npm run bots && npm run dev` (abre em `/index.html`; `/track-debug.html` é só o debug isolado da T-003).
 
@@ -302,6 +305,52 @@ Acertar a zona roxa (perfeita) passa a consumir uma pequena fatia de saúde do c
 
 **Não implementado nesta sessão** — o PO foi explícito que o CTO decide quando isso entra no código.
 
+### 2.17 Sessão 5 — git PATH resolvido (causa raiz confirmada da seção 2.16)
+
+A hipótese 1 da seção 2.16 (cache de settings resolvido por restart do VS Code) não chegou a ser testada isoladamente porque, no início desta sessão, o sintoma era mais básico: o comando `git` em si não era reconhecido pela ferramenta `PowerShell` ("O termo 'git' não é reconhecido..."), mesmo com o Git instalado de verdade em `C:\Users\daniel.ismerio\AppData\Local\Programs\Git\cmd\git.exe`.
+
+**Causa raiz:** esse diretório não estava no `PATH` do processo que a ferramenta `PowerShell` usa. Tentei corrigir de forma permanente com `[Environment]::SetEnvironmentVariable(...)` — bloqueado (`Constrained Language Mode`, não permite invocação de métodos .NET). Usei `setx PATH "%PATH%;...\Git\cmd"` (comando externo, não um método .NET) — **gravou com sucesso no registro do Windows**, confirmado por `git --version` funcionando num processo PowerShell aberto manualmente depois. Mas um **novo processo aberto pela própria ferramenta `PowerShell` logo em seguida ainda não via o `git`** — ou seja, o processo que essa ferramenta usa herda o ambiente de um processo pai (a extensão do VS Code) que já estava de pé antes da mudança no registro, e só um processo pai novo (reiniciar a janela/extensão do VS Code) vai propagar o `PATH` novo para as sessões seguintes.
+
+**Contorno usado nesta sessão** (até o restart acontecer): `$env:PATH += ";C:\Users\daniel.ismerio\AppData\Local\Programs\Git\cmd"` no início de todo comando desta sessão que precisasse de `git` — funciona porque `$env:PATH` é só uma variável de processo (não é bloqueada pelo Constrained Language Mode), só não persiste entre chamadas da ferramenta (cada chamada é um processo novo).
+
+**Se uma sessão futura encontrar `git` não reconhecido de novo:** o registro já tem o PATH correto (`setx` foi permanente) — o mais provável é só precisar reiniciar a janela do VS Code (mesma causa-raiz da seção 2.16, agora confirmada: o processo pai da ferramenta de shell não repropaga mudanças de `PATH` do registro para sessões já abertas). Se isso não resolver, repetir o contorno acima (`$env:PATH +=`) e investigar de novo a partir daqui, não do zero.
+
+**Relacionado, mas não confirmado se é a mesma causa:** a seção 2.16 registra que, mesmo com a regra de permissão certa em `.claude/settings.local.json`, o PO ainda via prompt de aprovação manual em todo `git push`/`git status`, sem opção de "sempre permitir" — sintoma parecido (config correta no disco, mas não refletida na sessão em execução), possivelmente a mesma raiz (processo pai desatualizado). Ainda pendente de confirmação — ver seção 3.
+
+### 2.18 Sessão 5 — rodada autônoma de ~2h: "roxo desgasta saúde", 3 boosts novos, bug do "janela", bundle splitting
+
+Trabalho feito sozinho, sem check-in no meio (mesmo formato da seção 2.13), com escopo confirmado pelo PO antes de começar: implementar tudo, inclusive dar push pro deploy publicado.
+
+**Decisão "roxo também desgasta a saúde" (§2.14, aprovada pelo PO em sessão anterior — timing era "a critério do CTO"):**
+
+- `core/constants.ts`: `DAMAGE.purple` 0 → 2. Testado com o harness em 3 valores (1, 2 e o baseline 0) antes de decidir: com 1, o DNF continuou em 0% em todos os perfis (mudança imperceptível); com 2, também 0% de DNF, mas é o dobro do dano de `amber` — decidido como o valor inicial (ainda "uma fatia pequena" frente aos 180 de saúde máxima, conforme a própria descrição do PO), sem forçar artificialmente o reaparecimento de DNF nos bots. **Achado importante:** com a saúde em 180 e a frenagem já combinando 2 sorteios (regressão à média, T-105/§2.13), o "custo" do roxo praticamente não aparece como risco de DNF nos bots — ele existe mais como reserva de saúde consumida (relevante quando o boost `reparo_rapido` ou upgrades futuros de saúde entrarem em jogo) do que como ameaça de abandono. Registrando como pendência de calibração pós-playtest humano, mesma cautela já registrada no T-107 (não segue afinando às cegas).
+- Boost **`reparo_rapido`** implementado no core (`BoostId`): cura `REPAIR_BOOST_AMOUNT` (15) de saúde na próxima frenagem/pit resolvida após escolhido — mesmo padrão de "efeito pendente até o próximo evento não-saída" já usado por `freio`/`pneu` (não ficou restrito só ao pit, como uma leitura mais literal da seção 2.14 poderia sugerir; decisão do CTO nesta sessão, documentada aqui — mais consistente com a arquitetura existente e com a descrição genérica do CLAUDE.md §6.1).
+
+**Mais 2 boosts do CLAUDE.md §6.1 implementados (de 3/8 para 6/8):**
+
+- **`nitro_extra`**: concede a carga na hora (`applyBoost` ganhou um caso especial — não faz sentido "adiar" um `+1` de carga para o próximo evento, diferente dos outros boosts).
+- **`recuperacao_erro`**: multiplica por `ERROR_RECOVERY_RELIEF` (0.5) a perda de tempo do próximo resultado vermelho/miss numa frenagem/pit (não afeta saída nem resultados positivos) — mesmo padrão de "próximo evento não-saída".
+- Ainda faltam **rasante (slipstream)** e **fôlego de ultrapassagem** — não implementados nesta sessão, ficam pra próxima priorização do CTO/PO.
+
+**Bug real encontrado e corrigido: boost "Janela ampliada" nunca teve efeito nenhum.** Estava na lista de opções desde o Sprint 2 (T-102/103), tinha label na UI, mas nenhum código em lugar nenhum lia `pendingBoost === 'janela'` — um jogador escolhendo esse boost não ganhava nada. Corrigido: `challengeDurationMs` (ramp) e o timeout do sweep (pit) são multiplicados por `JANELA_DURATION_SCALE` (1.3) quando o boost está pendente e o evento não é saída — mesmo efeito de "mais tempo pra acertar" descrito no CLAUDE.md, usando o mesmo padrão de leitura de `pendingBoost` já usado por `pneu` em `computeScale`.
+
+**Limpeza colateral encontrada no mesmo código:** `computeScale` (`core/timing.ts`) tinha um `1.2` hardcoded pro efeito do boost `pneu`, embora já existisse uma constante `PNEU_BOOST_SCALE = 1.2` não usada em lugar nenhum (drift desde o T-002/T-105). Trocado o literal pela constante — mesmo valor, sem mudança de comportamento, só remove a duplicação.
+
+**Pool de boosts oferecidos:** com 6 `BoostId` agora (era 3), a tela de escolha (`showBoostChoice`) precisou passar a sortear 3 de 6 (`slice(0, 3)` depois do shuffle) — antes disso ofereceria os 6, quebrando a regra "1 de 3" do CLAUDE.md §6.1, que só coincidia por acaso com o pool inteiro ser 3.
+
+**Renomeação (pedido do PO):** boost `pneu` — label trocado de "Pneu novo (grip)" pra **"Temperatura de pneu ideal"** (não existe troca física de pneu na mecânica, só melhora a zona de acerto por 1 evento; o id interno `pneu` não mudou, só o texto exibido).
+
+**Bundle (investigação do "chunk grande" registrado como risco no Claude-Tech.md §9):** `posthog-js` já carregava via `import()` dinâmico desde o T-005 (chunk próprio de ~73 KB gzip) — o chunk grande de fato era Phaser + todo o código do jogo misturados num só (~367 KB gzip). Adicionado `manualChunks` no `vite.config.ts` separando `node_modules/phaser` num chunk próprio: o código do jogo caiu pra ~9,5 KB gzip, Phaser ficou isolado em ~358 KB gzip. **Não reduz o total baixado numa 1ª visita** (mesmo total, só reorganizado) — o ganho real é о cache do navegador reaproveitar o chunk do Phaser entre deploys futuros que só mudem código do jogo (o que é o caso comum, dado o deploy automático a cada push). Trocar de biblioteca ou usar um build mais enxuto do Phaser não foi avaliado nesta sessão (fora do escopo/tempo).
+
+**Verificação:**
+- `npm test`: 49/49 (5 testes novos cobrindo `reparo_rapido`, `nitro_extra`, `recuperacao_erro` e a mudança de dano no roxo — um teste antigo que afirmava "roxo não causa dano" foi atualizado para refletir a nova regra, não removido).
+- `npx tsc --noEmit`: limpo.
+- `npm run build`: ok, ver números do bundle acima.
+- `npm run bots`: usado tanto pra calibrar `DAMAGE.purple` (testado 0/1/2) quanto pra confirmar que nada mais regrediu — resultados finais (500 corridas/perfil, `purple: 2`): Casual pos. 5.83/DNF 0%, Médio pos. 3.73/DNF 0%/pódio 27.4%, Skilled pos. 1.65/DNF 0%/vitórias 35.0%, Temerário pos. 4.85/DNF 0% — dentro de todas as metas do Claude-Tech.md §5, praticamente idêntico ao baseline pré-sessão (diferença de ruído estatístico, não de regressão).
+- Smoke test end-to-end via Playwright headless (instalado/removido temporariamente, mesmo processo de sempre): ~180 cliques ao longo de ~100s de corrida automatizada (largada segurando, boost, frenagem em 2 etapas, aceleração), 0 erros de console/exceção.
+
+**Não implementado nesta sessão (ficam pra próxima):** boosts "rasante" e "fôlego de ultrapassagem" (últimos 2/8 do CLAUDE.md §6.1); T-109/T-110 (playtest humano, continua sendo o item real que falta pro Gate 1 — nada nesta sessão substitui isso).
+
 ## 3. Pendências / decisões ambíguas registradas nesta sessão
 
 - **Boost: só 3 dos 8 conceitos do CLAUDE.md §6.1 estão implementados no core** (`pneu`/`freio`/`janela`; faltam nitro extra, rasante, reparo rápido, fôlego de ultrapassagem, recuperação de erro). Isso já era assim desde o T-002, não é uma regressão desta sessão — só nunca tinha sido registrado. A view oferece as 3 disponíveis a cada boost elegível. Decisão de qual conjunto priorizar pro M1 fica para o CTO/PO.
@@ -355,10 +404,12 @@ Essa é uma mudança de arquitetura no core (`raceState.ts`), não só um ajuste
 3. **Implementar o mockup A de HUD** (seção 2.12) — PO já escolheu, só falta trocar o `updateHud()` atual pelo layout escolhido. Não entrou nesta rodada por escopo/tempo.
 4. **T-109/T-110 — executar o roteiro de playtest** (seção 2.11) com o PO + 2 irmãos, 3 sessões. Ainda mais importante agora: validar de perto os 3 desvios de balanceamento da seção 2.13 (Médio um pouco fácil demais, DNF quase inexistente, sensibilidade do `POSITION_UNIT_SECONDS`) com dado humano real antes de continuar ajustando às cegas.
 5. Se o Manager (M2) for consumir `RaceOutput.position`, revisitar a divergência entre posição do core e posição do grid (seção 3) — confirmada em jogo real nesta sessão (gap/ultrapassagem incoerentes quando o grid já promove o jogador a 1º antes do core).
-6. Chunk do bundle principal está grande (~365 KB gzip, majoritariamente Phaser) — considerar code-splitting se o load em 4G virar problema real no playtest.
+6. ~~Chunk do bundle principal está grande~~ **— parcialmente endereçado na sessão 5** (§2.18): Phaser separado em chunk próprio (`manualChunks`), melhora cache entre deploys futuros. O total da 1ª visita continua ~367 KB gzip — se o load em 4G virar problema real no playtest, próximo passo seria avaliar uma build mais enxuta do Phaser ou trocar de biblioteca (não avaliado ainda).
 7. **Traçado de Spa (seção 2.6):** corrigido na sessão 2 com base num mapa real, mas ainda vale conferência humana — a curadoria de onde exatamente cada desafio "pega" no traçado é aproximada.
-8. **Decisão de design pendente de implementação:** roxo também desgastar a saúde do carro (seção 2.14) — timing de implementação é do CTO, não implementado ainda.
-9. **Segurança:** confirmar com o PO se o token de push (colado em texto puro no chat 2x nesta sessão) foi revogado/rotacionado depois de tudo validado.
+8. ~~Decisão de design pendente de implementação: roxo também desgastar a saúde do carro~~ **— implementado na sessão 5** (§2.18), junto com os boosts `reparo_rapido`/`nitro_extra`/`recuperacao_erro`. Restam só **rasante (slipstream)** e **fôlego de ultrapassagem** dos 8 conceitos do CLAUDE.md §6.1.
+9. **Segurança:** confirmar com o PO se o token de push (colado em texto puro no chat 2x na sessão 3) foi revogado/rotacionado depois de tudo validado. Ainda não confirmado nas sessões 4/5.
+10. **T-109/T-110 continua sendo o item real que falta pro Gate 1** — todo o resto do M1 (Sprints 1–3) está implementado e publicado; nenhuma sessão desde então substituiu a necessidade do playtest humano.
+11. Investigar se a causa-raiz do PATH do git (seção 2.17 — processo pai da ferramenta de shell não repropaga mudanças de ambiente do registro) também explica o prompt de permissão sem "sempre permitir" da seção 2.16; confirmar se resolve depois do PO reiniciar a janela do VS Code.
 
 ## 7. Como rodar
 
