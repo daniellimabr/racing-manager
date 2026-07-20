@@ -2,3 +2,7 @@ node_modules/
 dist/
 dist-ts/
 *.log
+.env
+.env.local
+telemetry-log.jsonl
+.claude/

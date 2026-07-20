@@ -15,6 +15,7 @@ import {
   SECONDS_PER_LAP_VISUAL, MAX_VISUAL_GAP_SECONDS, TIER_COLORS, BOOST_LABELS, TEAM_COLORS,
   DEFAULT_CAR_SETUP, DEFAULT_PIT_CREW_QUALITY,
 } from './viewConstants.js';
+import { track as trackEvent } from '../telemetry/analytics.js';
 
 const track = spaTrack as unknown as TrackDef;
 const PANEL_Y = CANVAS_HEIGHT - PANEL_HEIGHT;
@@ -63,6 +64,8 @@ export class RaceScene extends Phaser.Scene {
   private challengeTimer?: Phaser.Time.TimerEvent;
   private pendingNitro = false;
   private pendingOvertake = false;
+  private raceStartTime = 0;
+  private raceEnded = false;
 
   constructor() {
     super('RaceScene');
@@ -72,6 +75,9 @@ export class RaceScene extends Phaser.Scene {
     this.raceState = createRace(track, this.carSetup);
     this.gridState = createGridSim();
     this.playerCumulativeTime = 0;
+    this.raceStartTime = Date.now();
+    this.raceEnded = false;
+    trackEvent('race_start', { trackId: track.id });
 
     this.add.rectangle(0, 0, CANVAS_WIDTH, HUD_HEIGHT, 0x222222).setOrigin(0, 0);
     this.hudText = this.add.text(10, 8, '', { fontSize: '14px', color: '#eeeeee', lineSpacing: 4 });
@@ -160,7 +166,9 @@ export class RaceScene extends Phaser.Scene {
   /** Recalcula a posição de todos os ícones a partir do evento atual + gaps do grid. */
   private updateIconPositions(animate: boolean): void {
     const standings = this.currentStandings();
-    const refT = pathIndexToT(pathIndexForEvent(currentEvent(this.raceState)), track.path.length);
+    const s = this.raceState;
+    const referenceEvent = s.finished ? s.events[s.events.length - 1] : currentEvent(s);
+    const refT = pathIndexToT(pathIndexForEvent(referenceEvent), track.path.length);
 
     for (const standing of standings) {
       let entry = this.icons.get(standing.id);
@@ -194,11 +202,12 @@ export class RaceScene extends Phaser.Scene {
     const s = this.raceState;
     const standings = this.currentStandings();
     const playerStanding = standings.find((x) => x.isPlayer)!;
-    const ev = currentEvent(s);
+    const ev = s.finished ? undefined : currentEvent(s);
+    const eventLabel = !ev ? 'Corrida encerrada' : ev.kind === 'pit' ? 'Pit stop' : `${ev.cornerName ?? ''} (${ev.kind})`;
     const lines = [
       `Posição: ${playerStanding.position}/12   Volta: ${s.lap}/${track.laps}`,
       `Saúde: ${s.health}/${s.healthMax}   Nitro: ${s.nitro}`,
-      `Gap: ${formatGap(s.gapToAhead)}   ${ev.kind === 'pit' ? 'Pit stop' : `${ev.cornerName ?? ''} (${ev.kind})`}`,
+      `Gap: ${formatGap(s.gapToAhead)}   ${eventLabel}`,
     ];
     this.hudText.setText(lines.join('\n'));
   }
@@ -426,5 +435,17 @@ export class RaceScene extends Phaser.Scene {
       output.reviveUsed ? 'Revive usado nesta corrida' : '',
     ].filter(Boolean);
     this.panel.add(this.add.text(16, 12, lines.join('\n'), { fontSize: '15px', color: '#fff', lineSpacing: 8 }));
+
+    if (!this.raceEnded) {
+      this.raceEnded = true;
+      trackEvent('race_end', {
+        trackId: track.id,
+        position: playerStanding.position,
+        durationSec: Math.round((Date.now() - this.raceStartTime) / 1000),
+        lapsCompleted: output.lapsCompleted,
+        dnf: output.dnf,
+        reviveUsed: output.reviveUsed,
+      });
+    }
   }
 }
