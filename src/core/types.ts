@@ -81,12 +81,16 @@ export interface RaceState {
   finished: boolean;
   dnf: boolean;
   dnfReason?: string;
+  /** Gold "perdido" acumulado em crashes (batida forte) — preview da conexão com o Manager (M2), ver GOLD_CRASH_PENALTY. */
+  goldPenalty: number;
   log: string[];
 }
 
 export interface ResolveOptions {
   nitroUsed: boolean;
   overtakeAttempt?: boolean;
+  /** Injetável para testes determinísticos (ex.: chance de DNF instantâneo no miss). Default: Math.random. */
+  rng?: () => number;
 }
 
 export interface ResolveResult {
@@ -104,4 +108,6 @@ export interface RaceOutput {
   reviveUsed: boolean;
   lapsCompleted: number;
   events: string[];
+  /** Gold "perdido" acumulado em crashes nesta corrida — ver `RaceState.goldPenalty`. */
+  goldPenalty: number;
 }

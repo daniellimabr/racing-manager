@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { createRace, currentEvent, resolveCurrent, advance, revive, tryUseNitro, toRaceOutput, applyBoost } from '../src/core/raceState.js';
-import { POSITION_UNIT_SECONDS, REPAIR_BOOST_AMOUNT } from '../src/core/constants.js';
+import {
+  POSITION_UNIT_SECONDS, REPAIR_BOOST_AMOUNT, DAMAGE, GOLD_CRASH_PENALTY,
+  MISS_INSTANT_DNF_CHANCE_MIN, MISS_INSTANT_DNF_CHANCE_MAX,
+} from '../src/core/constants.js';
 import type { TrackDef, CarSetup } from '../src/core/types.js';
 
 const track: TrackDef = {
@@ -84,6 +87,7 @@ describe('saúde e DNF', () => {
     for (let i = 0; i < 20 && !s.dnf; i++) resolveCurrent(s, 'miss', { nitroUsed: false });
     expect(s.dnf).toBe(true);
     expect(s.dnfReason).toBe('batida forte');
+    expect(s.goldPenalty).toBe(GOLD_CRASH_PENALTY); // penalidade só é aplicada 1x (sessão 9, §2.26)
   });
 
   it('revive só funciona 1x por corrida e restaura metade da saúde', () => {
@@ -97,6 +101,60 @@ describe('saúde e DNF', () => {
     for (let i = 0; i < 20 && !s.dnf; i++) resolveCurrent(s, 'miss', { nitroUsed: false });
     expect(s.dnf).toBe(true);
     expect(revive(s)).toBe(false); // já usou
+  });
+});
+
+describe('DNF instantâneo no miss + penalidade de gold (sessão 9, Claude-Racing.md §2.26)', () => {
+  it('miss pode causar DNF instantâneo mesmo com saúde alta, se o rng cair abaixo da chance', () => {
+    const s = createRace(track, setup); // saúde cheia
+    advance(s);
+    resolveCurrent(s, 'miss', { nitroUsed: false, rng: () => 0 }); // rng sempre "acerta" o crash
+    expect(s.dnf).toBe(true);
+    expect(s.dnfReason).toBe('batida forte');
+    expect(s.health).toBe(0);
+    expect(s.goldPenalty).toBe(GOLD_CRASH_PENALTY);
+  });
+
+  it('miss não causa DNF instantâneo se o rng cair acima da chance máxima', () => {
+    const s = createRace(track, setup);
+    advance(s);
+    resolveCurrent(s, 'miss', { nitroUsed: false, rng: () => 0.999 }); // acima de MISS_INSTANT_DNF_CHANCE_MAX
+    expect(s.dnf).toBe(false);
+    expect(s.goldPenalty).toBe(0);
+  });
+
+  it('a chance de DNF instantâneo cresce conforme a saúde já está baixa', () => {
+    const rng = () => 0.3; // entre MISS_INSTANT_DNF_CHANCE_MIN (0.08) e MAX (0.5)
+
+    const sFull = createRace(track, setup); // saúde cheia
+    advance(sFull);
+    resolveCurrent(sFull, 'miss', { nitroUsed: false, rng });
+    expect(sFull.dnf).toBe(false); // saúde alta -> chance baixa -> rng 0.3 não "acerta"
+
+    const sLow = createRace(track, setup);
+    sLow.health = 30; // bem danificado
+    advance(sLow);
+    resolveCurrent(sLow, 'miss', { nitroUsed: false, rng });
+    expect(sLow.dnf).toBe(true); // saúde baixa -> chance mais alta -> o mesmo rng agora "acerta"
+  });
+
+  it('DNF por "defeito no carro" (não crash) não aplica penalidade de gold', () => {
+    const s = createRace(track, setup);
+    advance(s);
+    for (let i = 0; i < 100 && !s.dnf; i++) resolveCurrent(s, 'amber', { nitroUsed: false });
+    expect(s.dnf).toBe(true);
+    expect(s.dnfReason).toBe('defeito no carro');
+    expect(s.goldPenalty).toBe(0);
+  });
+});
+
+describe('saída aplica metade do dano, sem arredondar (regressão da sessão 9, §2.26)', () => {
+  it('resolve a largada (saída) com metade exata do dano cheio do tier', () => {
+    const s = createRace(track, setup); // currentEvent já é a largada (saída)
+    const before = s.health;
+    const r = resolveCurrent(s, 'green', { nitroUsed: false });
+    expect(r.damage).toBeCloseTo(DAMAGE.green / 2, 5);
+    expect(s.health).toBeCloseTo(before - DAMAGE.green / 2, 5);
   });
 });
 
@@ -122,8 +180,8 @@ describe('boosts (sessão 5)', () => {
     s.health = 50;
     applyBoost(s, 'reparo_rapido');
     advance(s); // vai para a 1ª frenagem
-    resolveCurrent(s, 'amber', { nitroUsed: false }); // amber: 1 de dano, +REPAIR_BOOST_AMOUNT de cura
-    expect(s.health).toBe(50 - 1 + REPAIR_BOOST_AMOUNT);
+    resolveCurrent(s, 'amber', { nitroUsed: false }); // amber: DAMAGE.amber de dano, +REPAIR_BOOST_AMOUNT de cura
+    expect(s.health).toBe(50 - DAMAGE.amber + REPAIR_BOOST_AMOUNT);
   });
 
   it('reparo_rapido não deixa a saúde passar do máximo', () => {

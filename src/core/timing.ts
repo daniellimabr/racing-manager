@@ -1,5 +1,7 @@
 import type { Tier } from './types.js';
-import { ZONE_BASE_HALVES, MAX_SCALE, OVERTAKE_GAP_THRESHOLD, PNEU_BOOST_SCALE } from './constants.js';
+import {
+  ZONE_BASE_HALVES, MAX_SCALE, OVERTAKE_GAP_THRESHOLD, PNEU_BOOST_SCALE, HEALTH_DIFFICULTY_FLOOR,
+} from './constants.js';
 
 export interface ZoneHalves {
   purple: number;
@@ -50,6 +52,12 @@ export interface ScaleOptions {
   gap: number;
   pendingBoostIsPneu: boolean;
   pitCrewQuality?: number; // 0..1
+  /**
+   * 0..1 (saúde atual / máxima). Opcional, default 1 (saúde cheia, sem
+   * dificuldade extra) — feedback do PO (sessão 9, Claude-Racing.md §2.26):
+   * carro mais danificado fica mais difícil de guiar. Ver HEALTH_DIFFICULTY_FLOOR.
+   */
+  healthFraction?: number;
 }
 
 /** Calcula o fator de escala final da zona para um desafio específico. */
@@ -65,6 +73,8 @@ export function computeScale(opts: ScaleOptions): number {
   if (!opts.isSaida && opts.pendingBoostIsPneu) {
     scale *= PNEU_BOOST_SCALE;
   }
+  const healthFraction = Math.max(0, Math.min(1, opts.healthFraction ?? 1));
+  scale *= HEALTH_DIFFICULTY_FLOOR + (1 - HEALTH_DIFFICULTY_FLOOR) * healthFraction;
   return Math.min(scale, MAX_SCALE);
 }
 

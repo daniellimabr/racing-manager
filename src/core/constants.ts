@@ -17,16 +17,53 @@ export const GAIN: Record<Tier, number> = {
  *
  * `purple` > 0 (sessão 5): decisão do PO registrada em Claude-Racing.md §2.14 —
  * acertar a zona perfeita também desgasta o carro (correr no limite tem custo),
- * não só errar. Valor inicial igual ao de `amber` (conservador); recalibrado
- * empiricamente via harness nesta mesma sessão — ver Claude-Racing.md.
+ * não só errar.
+ *
+ * Recalibrado de novo na sessão 9 (Claude-Racing.md §2.26), a pedido do PO após
+ * o playtest: todo tier passa a desgastar a saúde, inclusive `green` (antes
+ * gratuito) — a lógica real é "consumo de pneu/desgaste", não só erro. Ordem
+ * relativa preservada (green < amber < purple < red < miss), só a régua muda.
+ * `miss` sobe bem mais que os outros (6 → 12): o PO pediu que fosse grave —
+ * "como se o piloto nem freiasse, é caixa de brita na hora" — e ganhou também
+ * uma chance de DNF instantâneo (ver MISS_INSTANT_DNF_CHANCE_*), não só dano.
+ * `healthMax` do carro padrão foi recalibrado junto — ver DEFAULT_CAR_SETUP.
  */
 export const DAMAGE: Record<Tier, number> = {
-  purple: 2,
-  green: 0,
-  amber: 1,
-  red: 3,
-  miss: 6,
+  purple: 3,
+  green: 1,
+  amber: 2,
+  red: 5,
+  miss: 12,
 };
+
+/**
+ * Chance de DNF instantâneo ("batida forte") ao tirar `miss`, independente da
+ * saúde ainda não ter zerado — feedback do PO (sessão 9, Claude-Racing.md
+ * §2.26): um miss é "caixa de brita na hora", não só perda de tempo. Cresce
+ * conforme a saúde já está baixa (carro mais debilitado, mais fácil de perder
+ * de vez o controle). Interpolação linear entre os 2 valores por `health/healthMax`.
+ */
+export const MISS_INSTANT_DNF_CHANCE_MIN = 0.08; // saúde cheia
+export const MISS_INSTANT_DNF_CHANCE_MAX = 0.5; // saúde baixa
+
+/**
+ * Penalidade de Gold aplicada num crash (DNF por "batida forte"). Pedido do PO
+ * (sessão 9): primeiro fio de conexão com a economia do Manager (M2) — ainda
+ * não existe carteira de verdade em M1, então isso só é calculado e exposto
+ * (RaceOutput.goldPenalty + telemetria `dnf`), não subtraído de lugar nenhum
+ * de verdade ainda. Valor provisório, sem calibração de economia (isso é
+ * trabalho de M2).
+ */
+export const GOLD_CRASH_PENALTY = 50;
+
+/**
+ * Piso do multiplicador de dificuldade por saúde (`computeScale`, core/timing.ts).
+ * Pedido do PO (sessão 9): carro mais danificado fica mais difícil de guiar —
+ * a zona de acerto nunca fica menor que este piso, mesmo com saúde zerada
+ * (pra não virar literalmente impossível). Valor inicial não confirmado pelo
+ * PO, a validar em playtest.
+ */
+export const HEALTH_DIFFICULTY_FLOOR = 0.6;
 
 /** Boost "reparo rápido" (CLAUDE.md §6.1): saúde recuperada na próxima frenagem/pit após escolhido. */
 export const REPAIR_BOOST_AMOUNT = 15;
@@ -73,5 +110,12 @@ export const ZONE_BASE_HALVES = { purple: 8, green: 20, amber: 35 };
  */
 export const POSITION_UNIT_SECONDS = 4.25;
 
-/** valores padrão do carro do jogador até o Manager alimentar o RaceInput de verdade (M2) */
-export const DEFAULT_CAR_SETUP: CarSetup = { zoneScale: 1, healthMax: 180, nitroCharges: 3 };
+/**
+ * valores padrão do carro do jogador até o Manager alimentar o RaceInput de
+ * verdade (M2). `healthMax` recalibrado na sessão 9 junto com o novo `DAMAGE`
+ * (180 → 220): meta do PO é "correr tudo no verde e chegar com ~metade da
+ * saúde" ser razoável, e "correr tudo no roxo" ser praticamente inviável de
+ * terminar. Valor inicial calculado a mão (ver Claude-Racing.md §2.26 pra
+ * conta) e confirmado/ajustado via harness de bots na mesma sessão.
+ */
+export const DEFAULT_CAR_SETUP: CarSetup = { zoneScale: 1, healthMax: 260, nitroCharges: 3 };

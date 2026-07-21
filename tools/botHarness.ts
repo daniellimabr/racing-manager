@@ -85,12 +85,14 @@ function main() {
   for (const profile of PROFILES) {
     let dnfCount = 0;
     let positions: number[] = [];
+    let goldPenalties: number[] = [];
     let killerAgg: Record<string, number> = {};
 
     for (let i = 0; i < N; i++) {
       const { output, killerCorners } = simulateOne(track, profile);
       if (output.dnf) dnfCount++;
       positions.push(output.position);
+      goldPenalties.push(output.goldPenalty);
       for (const [k, v] of Object.entries(killerCorners)) killerAgg[k] = (killerAgg[k] ?? 0) + v;
     }
 
@@ -98,10 +100,11 @@ function main() {
     const dnfRate = ((dnfCount / N) * 100).toFixed(1);
     const winRate = ((positions.filter((p) => p === 1).length / N) * 100).toFixed(1);
     const podiumRate = ((positions.filter((p) => p <= 3).length / N) * 100).toFixed(1);
+    const avgGoldPenalty = (goldPenalties.reduce((a, b) => a + b, 0) / goldPenalties.length).toFixed(1);
     const topKillers = Object.entries(killerAgg).sort((a, b) => b[1] - a[1]).slice(0, 3)
       .map(([k, v]) => `${k} (${v})`).join(', ');
 
-    console.log(`${profile.name.padEnd(12)} | pos. média: ${avgPos.padStart(5)} | DNF: ${dnfRate.padStart(5)}% | vitórias: ${winRate.padStart(5)}% | pódio: ${podiumRate.padStart(5)}% | curvas assassinas: ${topKillers}`);
+    console.log(`${profile.name.padEnd(12)} | pos. média: ${avgPos.padStart(5)} | DNF: ${dnfRate.padStart(5)}% | vitórias: ${winRate.padStart(5)}% | pódio: ${podiumRate.padStart(5)}% | gold perdido (méd.): ${avgGoldPenalty.padStart(5)} | curvas assassinas: ${topKillers}`);
   }
   console.log('');
 }

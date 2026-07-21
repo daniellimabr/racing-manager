@@ -20,6 +20,7 @@ import {
 } from './viewConstants.js';
 import { track as trackEvent } from '../telemetry/analytics.js';
 import { juice } from './juice.js';
+import { GOLD_CRASH_PENALTY } from '../core/constants.js';
 
 const track = spaTrack as unknown as TrackDef;
 const PANEL_Y = CANVAS_HEIGHT - PANEL_HEIGHT;
@@ -35,6 +36,19 @@ function pathIndexForEvent(ev: RaceEvent): number {
     if (corner) return ev.kind === 'saida' ? corner.pathIndex + 0.5 : corner.pathIndex;
   }
   return 0; // largada
+}
+
+/**
+ * Nitro ganha um nome contextual por tipo de evento (pedido do PO, sessão 9):
+ * "KERS" na aceleração (saída) — alusão ao sistema de recuperação de energia
+ * da F1 de 2012; "Magic" na frenagem/pit — alusão ao "magic button" de Lewis
+ * Hamilton em Bahrein 2012 (McLaren; o pedido citou "Mercedes", mas o
+ * episódio real foi antes da troca de equipe — mantido o nome pedido mesmo
+ * assim, é a referência que o PO quis). Só o rótulo muda; `nitro`/`pendingNitro`
+ * continuam os mesmos internamente.
+ */
+function nitroLabel(ev: RaceEvent): string {
+  return ev.kind === 'saida' ? 'KERS' : 'Magic';
 }
 
 function formatGap(gap: number): string {
@@ -359,7 +373,7 @@ export class RaceScene extends Phaser.Scene {
     const hpPct = s.healthMax > 0 ? Math.max(0, s.health / s.healthMax) : 0;
     this.hudHealthBarFill.width = 260 * hpPct;
     this.hudHealthBarFill.setFillStyle(hpPct > 0.5 ? 0x2ecc71 : hpPct > 0.25 ? 0xf1c40f : 0xe74c3c);
-    this.hudHealthLabelText.setText(`SAÚDE ${s.health}/${s.healthMax}`);
+    this.hudHealthLabelText.setText(`SAÚDE ${Math.round(s.health)}/${s.healthMax}`);
 
     this.drawHudNitro(s.nitro, this.carSetup.nitroCharges);
 
@@ -545,8 +559,10 @@ export class RaceScene extends Phaser.Scene {
     this.clearPanel();
     // Feedback do PO: o toggle+confirmar do nitro não estava claro — 2 botões
     // diretos (Sim/Não), cada um já define a opção e avança pro desafio.
+    // Nome contextual (KERS/Magic) — ver nitroLabel().
+    const label = nitroLabel(ev);
     const nitroWord = this.raceState.nitro === 1 ? 'disponível' : 'disponíveis';
-    this.panel.add(this.add.text(16, 12, `Usar nitro? (${this.raceState.nitro} ${nitroWord})`, {
+    this.panel.add(this.add.text(16, 12, `Usar ${label}? (${this.raceState.nitro} ${nitroWord})`, {
       fontSize: '13px', color: '#ccc',
     }));
     const y = 40;
@@ -557,8 +573,8 @@ export class RaceScene extends Phaser.Scene {
       this.pendingNitro = useNitro;
       this.startTimingChallenge(ev);
     };
-    this.panel.add(this.makeButton(16, y, halfW, 44, 'Nitro: SIM', 0x64b5f6, () => decide(true)));
-    this.panel.add(this.makeButton(16 + halfW + gap, y, halfW, 44, 'Nitro: NÃO', 0x455a64, () => decide(false)));
+    this.panel.add(this.makeButton(16, y, halfW, 44, `${label}: SIM`, 0x64b5f6, () => decide(true)));
+    this.panel.add(this.makeButton(16 + halfW + gap, y, halfW, 44, `${label}: NÃO`, 0x455a64, () => decide(false)));
     this.preChallengeTimer = this.time.delayedCall(PRE_CHALLENGE_TIME_LIMIT_MS, () => decide(false));
   }
 
@@ -572,6 +588,7 @@ export class RaceScene extends Phaser.Scene {
       gap: this.raceState.gapToAhead,
       pendingBoostIsPneu: this.raceState.pendingBoost === 'pneu',
       pitCrewQuality: DEFAULT_PIT_CREW_QUALITY,
+      healthFraction: this.raceState.health / this.raceState.healthMax,
     });
     this.challengeHalves = zoneHalves(scale);
 
@@ -814,6 +831,7 @@ export class RaceScene extends Phaser.Scene {
     if (!wasDnf && this.raceState.dnf) {
       trackEvent('dnf', {
         trackId: track.id, lap: this.raceState.lap, reason: this.raceState.dnfReason, challengeId,
+        goldPenalty: this.raceState.dnfReason === 'batida forte' ? GOLD_CRASH_PENALTY : 0,
       });
     }
 
@@ -857,7 +875,13 @@ export class RaceScene extends Phaser.Scene {
     this.panel.add(this.add.text(16, 12, `DNF — ${this.raceState.dnfReason ?? 'motivo desconhecido'}`, {
       fontSize: '16px', color: '#ff6666', fontStyle: 'bold',
     }));
-    let y = 56;
+    let y = 40;
+    if (this.raceState.dnfReason === 'batida forte') {
+      this.panel.add(this.add.text(16, y, `Penalidade: -${GOLD_CRASH_PENALTY} Gold`, {
+        fontSize: '13px', color: '#ffd54f',
+      }));
+      y += 24;
+    }
     const reviveOffered = !this.raceState.usedRevive;
     if (reviveOffered) {
       const reviveBtn = this.makeButton(16, y, CANVAS_WIDTH - 32, 44, 'Voltar à corrida (revive)', 0x81c784, () => {
@@ -886,6 +910,7 @@ export class RaceScene extends Phaser.Scene {
       `Voltas completadas: ${output.lapsCompleted}/${track.laps}`,
       output.dnf ? `DNF (${output.dnfReason})` : 'Chegou à bandeira quadriculada',
       output.reviveUsed ? 'Revive usado nesta corrida' : '',
+      output.goldPenalty > 0 ? `Penalidade total: -${output.goldPenalty} Gold` : '',
     ].filter(Boolean);
     this.panel.add(this.add.text(16, 12, lines.join('\n'), { fontSize: '15px', color: '#fff', lineSpacing: 8 }));
 

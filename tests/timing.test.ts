@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { tierFromPosition, zoneHalves, computeScale, canAttemptOvertake, combineTiers } from '../src/core/timing.js';
+import { HEALTH_DIFFICULTY_FLOOR } from '../src/core/constants.js';
 
 describe('tierFromPosition', () => {
   const halves = zoneHalves(1);
@@ -64,6 +65,19 @@ describe('computeScale', () => {
   it('nunca ultrapassa o teto de escala (MAX_SCALE)', () => {
     const s = computeScale({ base: 1.4, isPit: true, isSaida: false, overtakeAttempt: false, gap: 0, pendingBoostIsPneu: true, pitCrewQuality: 1 });
     expect(s).toBeLessThanOrEqual(1.5);
+  });
+
+  it('sem healthFraction, se comporta como saúde cheia (compatibilidade retroativa)', () => {
+    const withDefault = computeScale({ base: 1, isPit: false, isSaida: false, overtakeAttempt: false, gap: 0, pendingBoostIsPneu: false });
+    const withFull = computeScale({ base: 1, isPit: false, isSaida: false, overtakeAttempt: false, gap: 0, pendingBoostIsPneu: false, healthFraction: 1 });
+    expect(withDefault).toBe(withFull);
+  });
+
+  it('saúde baixa estreita a zona, até o piso de HEALTH_DIFFICULTY_FLOOR (sessão 9, §2.26)', () => {
+    const full = computeScale({ base: 1, isPit: false, isSaida: false, overtakeAttempt: false, gap: 0, pendingBoostIsPneu: false, healthFraction: 1 });
+    const zero = computeScale({ base: 1, isPit: false, isSaida: false, overtakeAttempt: false, gap: 0, pendingBoostIsPneu: false, healthFraction: 0 });
+    expect(zero).toBeLessThan(full);
+    expect(zero).toBeCloseTo(HEALTH_DIFFICULTY_FLOOR, 5);
   });
 });
 

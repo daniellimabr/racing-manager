@@ -6,6 +6,7 @@ import { buildEventSequence } from './track.js';
 import {
   GAIN, DAMAGE, NITRO_GOOD_BONUS, NITRO_BAD_RELIEF, POSITION_UNIT_SECONDS,
   REPAIR_BOOST_AMOUNT, ERROR_RECOVERY_RELIEF,
+  MISS_INSTANT_DNF_CHANCE_MIN, MISS_INSTANT_DNF_CHANCE_MAX, GOLD_CRASH_PENALTY,
 } from './constants.js';
 
 export function createRace(
@@ -35,6 +36,7 @@ export function createRace(
     zoneScaleBase: setup.zoneScale,
     finished: false,
     dnf: false,
+    goldPenalty: 0,
     log: [],
   };
   state.gapToAhead = computeGapToAhead(state);
@@ -97,7 +99,10 @@ export function resolveCurrent(state: RaceState, tier: Tier, opts: ResolveOption
 
   let dmg = DAMAGE[tier];
   if (!isSaida && state.pendingBoost === 'freio') dmg = Math.round(dmg / 2);
-  const appliedDmg = isSaida ? Math.round(dmg / 2) : dmg;
+  // sem arredondar aqui: com os valores baixos de DAMAGE (sessão 9, ex. green=1),
+  // Math.round(1/2) virava 1 de novo — a saída deixava de aplicar "metade" de
+  // verdade pra tiers de dano ímpar. `health` aceita fração; só a exibição arredonda.
+  const appliedDmg = isSaida ? dmg / 2 : dmg;
   state.health = Math.max(0, state.health - appliedDmg);
   if (!isSaida && state.pendingBoost === 'reparo_rapido') {
     state.health = Math.min(state.healthMax, state.health + REPAIR_BOOST_AMOUNT);
@@ -124,9 +129,25 @@ export function resolveCurrent(state: RaceState, tier: Tier, opts: ResolveOption
   const message = `${gain >= 0 ? 'ganhou' : 'perdeu'} ${Math.abs(gain).toFixed(2)}s`;
   state.log.push(`volta ${ev.lap} · ${ev.cornerName ?? ev.kind} (${ev.kind}): ${tier} — ${message}`);
 
-  if (state.health <= 0 && !state.dnf) {
+  // DNF instantâneo no "miss" — feedback do PO (Claude-Racing.md §2.26): um miss
+  // é grave ("caixa de brita na hora"), não só perda de tempo. Chance cresce
+  // conforme a saúde já está baixa neste ponto (após o dano deste evento).
+  let instantCrash = false;
+  if (tier === 'miss' && state.health > 0) {
+    const healthFraction = state.health / state.healthMax;
+    const chance = MISS_INSTANT_DNF_CHANCE_MIN
+      + (MISS_INSTANT_DNF_CHANCE_MAX - MISS_INSTANT_DNF_CHANCE_MIN) * (1 - healthFraction);
+    const rng = opts.rng ?? Math.random;
+    instantCrash = rng() < chance;
+  }
+
+  if ((state.health <= 0 || instantCrash) && !state.dnf) {
+    if (instantCrash) state.health = 0;
     state.dnf = true;
     state.dnfReason = (tier === 'red' || tier === 'miss') ? 'batida forte' : 'defeito no carro';
+    // Penalidade de Gold só em crash de verdade ("batida forte"), não em
+    // "defeito no carro" — preview da conexão com o Manager (M2), ver GOLD_CRASH_PENALTY.
+    if (state.dnfReason === 'batida forte') state.goldPenalty += GOLD_CRASH_PENALTY;
   }
 
   return { tier, gainSeconds: gain, damage: appliedDmg, positionChanged, message };
@@ -160,5 +181,6 @@ export function toRaceOutput(state: RaceState): RaceOutput {
     reviveUsed: state.usedRevive,
     lapsCompleted: state.finished ? state.track.laps : Math.max(0, state.lap - 1),
     events: state.log,
+    goldPenalty: state.goldPenalty,
   };
 }
