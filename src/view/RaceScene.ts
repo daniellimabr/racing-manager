@@ -21,6 +21,11 @@ import {
 import { track as trackEvent } from '../telemetry/analytics.js';
 import { juice } from './juice.js';
 import { GOLD_CRASH_PENALTY } from '../core/constants.js';
+// E-202/E-203 (Manager, M2): recompensas pós-corrida (Gold + peças) — ponto de
+// integração mínimo pedido nesta sessão, ver Claude-Manager.md.
+import { computeRaceRewards, RARITY_LABELS, PART_SLOT_LABELS } from '../core/economy.js';
+import type { RaceRewardResult, FusionResult } from '../core/economy.js';
+import { loadGame, applyRaceRewards } from '../persistence/gameSave.js';
 
 const track = spaTrack as unknown as TrackDef;
 const PANEL_Y = CANVAS_HEIGHT - PANEL_HEIGHT;
@@ -106,6 +111,11 @@ export class RaceScene extends Phaser.Scene {
   private raceStartTime = 0;
   private raceEnded = false;
 
+  // E-202 (Manager, M2): recompensa da corrida atual, calculada 1x em showSummary()
+  private lastReward: RaceRewardResult | null = null;
+  private lastFusions: FusionResult[] = [];
+  private lastGoldTotal = 0;
+
   // T-105: modelo de input varia por tipo de desafio (ver Claude-Racing.md §2.10/§2.13)
   private challengeMode: 'sweep' | 'ramp' | 'hold' = 'sweep';
   private challengeCenter = BRAKE_CENTER;
@@ -127,6 +137,15 @@ export class RaceScene extends Phaser.Scene {
 
   constructor() {
     super('RaceScene');
+  }
+
+  /**
+   * Recebe o `carSetup` real do Hub (E-204/E-203) via `scene.start('RaceScene', { carSetup })`.
+   * Sem dado (ex.: cena iniciada direto, sem passar pelo Hub) mantém o
+   * `DEFAULT_CAR_SETUP` já usado como valor inicial do campo da classe.
+   */
+  init(data: { carSetup?: CarSetup } = {}): void {
+    if (data.carSetup) this.carSetup = data.carSetup;
   }
 
   create(): void {
@@ -899,8 +918,20 @@ export class RaceScene extends Phaser.Scene {
     this.panel.add(endBtn);
   }
 
+  /**
+   * Tela de resumo — única tela que usa a altura INTEIRA do canvas (não só a
+   * faixa de 220px do `panel`): virou a tela final da sessão (E-202 adicionou
+   * Gold/peças/fusões, uma quantidade variável de linhas que não cabe mais na
+   * faixa curta usada durante a corrida). `this.panel` é reaproveitado
+   * (reposicionado pra (0,0) só aqui) em vez de criar um container novo — ele
+   * já é destruído/recriado no próximo `create()` (próxima corrida), então
+   * reposicioná-lo aqui não vaza estado pra nenhum outro fluxo desta cena.
+   */
   private showSummary(manualAbandon = false): void {
     this.clearPanel();
+    this.add.rectangle(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT, 0x0d0f12, 0.97).setOrigin(0, 0).setDepth(500);
+    this.panel.setPosition(0, 0).setDepth(501);
+
     const standings = this.currentStandings();
     const playerStanding = standings.find((x) => x.isPlayer)!;
     const output = toRaceOutput(this.raceState);
@@ -912,8 +943,10 @@ export class RaceScene extends Phaser.Scene {
       output.reviveUsed ? 'Revive usado nesta corrida' : '',
       output.goldPenalty > 0 ? `Penalidade total: -${output.goldPenalty} Gold` : '',
     ].filter(Boolean);
-    this.panel.add(this.add.text(16, 12, lines.join('\n'), { fontSize: '15px', color: '#fff', lineSpacing: 8 }));
 
+    // E-202 (Manager, M2): Gold + peças ganhas nesta corrida, aplicadas ao save
+    // persistido uma única vez (mesmo guard `raceEnded` já usado pra telemetria
+    // não disparar 2x se showSummary for chamado de novo).
     if (!this.raceEnded) {
       this.raceEnded = true;
       trackEvent('race_end', {
@@ -925,25 +958,63 @@ export class RaceScene extends Phaser.Scene {
         reviveUsed: output.reviveUsed,
         manualAbandon,
       });
+
+      // usa a posição do grid (a mesma que o HUD mostrou o jogo inteiro), não
+      // `output.position` (core, modelo 1D) — evita a divergência já registrada
+      // em Claude-Racing.md §3 pagar/premiar uma posição diferente da que o
+      // jogador viu na tela durante a corrida toda.
+      const reward = computeRaceRewards({
+        position: playerStanding.position, dnf: output.dnf, goldPenalty: output.goldPenalty,
+      });
+      const save = loadGame();
+      const { save: updatedSave, fusions } = applyRaceRewards(save, reward);
+      this.lastReward = reward;
+      this.lastFusions = fusions;
+      this.lastGoldTotal = updatedSave.gold;
     }
 
-    this.showFeedbackPrompt();
+    if (this.lastReward) {
+      lines.push('');
+      lines.push(`+${this.lastReward.gold} Gold (saldo: ${this.lastGoldTotal})`);
+      for (const drop of this.lastReward.partsDropped) {
+        lines.push(`Peça ganha: ${PART_SLOT_LABELS[drop.slot]} (${RARITY_LABELS[drop.rarity]})`);
+      }
+      for (const fusion of this.lastFusions) {
+        lines.push(`Fusão! ${PART_SLOT_LABELS[fusion.slot]}: ${RARITY_LABELS[fusion.from]} → ${RARITY_LABELS[fusion.to]}`);
+      }
+    }
+
+    this.panel.add(this.add.text(24, 32, lines.join('\n'), { fontSize: '16px', color: '#fff', lineSpacing: 8 }));
+
+    // altura ocupada pelo texto acima (aproximação por linha — fonte monoespaçada
+    // o suficiente pra isso ser só uma estimativa de layout, não de medida exata)
+    const textBottomY = 32 + lines.length * 24 + 24;
+    this.showFeedbackPrompt(textBottomY);
+    this.showBackToHubButton(textBottomY + 96);
+  }
+
+  /** Botão pra voltar ao Hub (E-204) depois do resumo — fecha o loop corrida→hub→corrida. */
+  private showBackToHubButton(y: number): void {
+    const btn = this.makeButton(24, y, CANVAS_WIDTH - 48, 44, 'Voltar ao Hub', 0x64b5f6, () => {
+      this.scene.start('HubScene');
+    });
+    this.panel.add(btn);
   }
 
   /** "Quer jogar de novo?" 1-5, na tela de fim (T-108). */
-  private showFeedbackPrompt(): void {
+  private showFeedbackPrompt(y: number): void {
     const feedbackContainer = this.add.container(0, 0);
     this.panel.add(feedbackContainer);
-    feedbackContainer.add(this.add.text(16, 145, 'Quer jogar de novo?', { fontSize: '14px', color: '#fff' }));
+    feedbackContainer.add(this.add.text(24, y, 'Quer jogar de novo?', { fontSize: '14px', color: '#fff' }));
 
     const gap = 8;
-    const btnW = (CANVAS_WIDTH - 32 - gap * 4) / 5;
+    const btnW = (CANVAS_WIDTH - 48 - gap * 4) / 5;
     for (let score = 1; score <= 5; score++) {
-      const x = 16 + (score - 1) * (btnW + gap);
-      const btn = this.makeButton(x, 175, btnW, 40, String(score), 0xffd54f, () => {
+      const x = 24 + (score - 1) * (btnW + gap);
+      const btn = this.makeButton(x, y + 30, btnW, 40, String(score), 0xffd54f, () => {
         trackEvent('feedback_score', { trackId: track.id, score });
         feedbackContainer.removeAll(true);
-        feedbackContainer.add(this.add.text(16, 145, 'Valeu pelo feedback!', { fontSize: '14px', color: '#81c784' }));
+        feedbackContainer.add(this.add.text(24, y, 'Valeu pelo feedback!', { fontSize: '14px', color: '#81c784' }));
       });
       feedbackContainer.add(btn);
     }

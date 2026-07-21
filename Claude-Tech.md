@@ -193,6 +193,8 @@ Rodada de ~2h sem check-in, autorizada pelo PO. Detalhe técnico completo em Cla
 
 ### M2 — Épicos (detalhamento de tarefas após o Gate 1)
 
+**Status (2026-07-21, sessão 1 da trilha Manager): E-201 a E-206 ✅ implementados de ponta a ponta** numa rodada autônoma (Sprint 5) — energia (regen calibrada em 12 min/ponto, verificado contra o Archero real), Hub/Garagem como nova tela inicial, Gold+peças pós-corrida, inventário/fusão 3→1 alimentando `zoneScale` real no `RaceInput`, persistência local (`localStorage` via wrapper próprio) e harness de economia (`tools/economyHarness.ts`) com 2 rodadas de calibração. Detalhe técnico completo, tabela de resultados do harness e perguntas específicas pro PO em `Claude-Manager.md`.
+
 E-201 Energia (teto 30, custo 5, regen a definir com bots) · E-202 Recompensas pós-corrida (Gold + drops de peças por posição) · E-203 Inventário + fusão 3→1 + upgrade → `zoneScale` real no RaceInput · E-204 Hub Garagem/QG + navegação · E-205 Persistência local completa · E-206 Balance econômico via harness estendido.
 
 ### M3+ — Épicos

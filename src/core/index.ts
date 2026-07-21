@@ -4,3 +4,4 @@ export * from './timing.js';
 export * from './track.js';
 export * from './raceState.js';
 export * from './grid.js';
+export * from './economy.js';
