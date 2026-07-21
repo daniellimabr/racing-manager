@@ -49,6 +49,26 @@ export const LARGADA_FALL_RATE = 0.10; // unidades/ms caindo quando solta
 export const TWEEN_DURATION_MS = 1000;
 
 /**
+ * Tempo (ms) entre o desafio aparecer na tela (rótulo + barra visíveis, cursor
+ * parado na posição inicial) e o cursor começar de fato a se mover — dá tempo
+ * de LER qual curva/tipo de desafio é antes de precisar reagir. Feedback de um
+ * dos irmãos do PO (Claude-Racing.md §2.28): o cursor começava a andar (e o
+ * timer de miss já contava) no mesmo instante em que o desafio aparecia, sem
+ * nenhuma janela de leitura. O irmão sugeriu um modelo de "2 toques" (1º inicia
+ * o desafio, 2º tenta acertar); o PO escolheu deliberadamente a solução mais
+ * simples — só atrasar o início do movimento — mantendo a interação em 1
+ * toque só. Aplica-se a `ramp` (frenagem/aceleração) e `sweep` (pit); a
+ * largada já tinha seu próprio "PREPARE-SE" (LARGADA_PREP_MS, 1500ms) desde o
+ * T-105 e não foi alterada — é um princípio parecido, mecanismo diferente.
+ * 600ms escolhido por sensação (dá pra ler um rótulo curto como "Eau
+ * Rouge/Raidillon — ponto de frenagem (1/2)" sem alongar demais a cadência de
+ * ~150 eventos/corrida — 600ms × 150 ≈ 90s extra numa corrida de ~5min,
+ * aceitável; bem mais curto que o LARGADA_PREP_MS porque este se repete a
+ * cada desafio, não só 1x por corrida).
+ */
+export const CHALLENGE_PREP_MS = 600;
+
+/**
  * Conversão de segundos de gap em fração do traçado, para posicionar os
  * carros do grid num "pelotão" visualmente coerente (modelo 1D, sem física —
  * ver risco "escopo do grid" em Claude-Tech.md §9). ~5 min / 8 voltas.

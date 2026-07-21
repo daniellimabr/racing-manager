@@ -3,15 +3,14 @@ import spaTrack from '../../tracks/spa.json';
 import type { TrackDef, RaceState, RaceEvent, Tier, BoostId, CarSetup } from '../core/types.js';
 import {
   createRace, currentEvent, resolveCurrent, advance, revive, toRaceOutput,
-  setOvertakeAttempt, applyBoost, tryUseNitro,
+  setOvertakeAttempt, applyBoost, tryUseNitro, raceStandings,
 } from '../core/raceState.js';
 import { tierFromPosition, zoneHalves, computeScale, canAttemptOvertake, combineTiers } from '../core/timing.js';
-import { createGridSim, advanceGrid, deriveStandings } from '../core/grid.js';
-import type { GridState, GridStanding } from '../core/grid.js';
+import type { GridStanding } from '../core/grid.js';
 import { normalizedToScreen, pathIndexToT, pointAtT } from './pathUtils.js';
 import {
   TRACK_RECT, CANVAS_WIDTH, CANVAS_HEIGHT, HUD_HEIGHT, PANEL_HEIGHT,
-  CURSOR_SWEEP_PERIOD_MS, CHALLENGE_TIME_LIMIT_MS, PRE_CHALLENGE_TIME_LIMIT_MS, TWEEN_DURATION_MS,
+  CURSOR_SWEEP_PERIOD_MS, CHALLENGE_TIME_LIMIT_MS, PRE_CHALLENGE_TIME_LIMIT_MS, TWEEN_DURATION_MS, CHALLENGE_PREP_MS,
   SECONDS_PER_LAP_VISUAL, MAX_VISUAL_GAP_SECONDS, TIER_COLORS, BOOST_LABELS, BOOST_DESCRIPTIONS, TEAM_COLORS,
   DEFAULT_CAR_SETUP, DEFAULT_PIT_CREW_QUALITY,
   RAMP_DURATION_MS, ACCEL_CENTER, BRAKE_CENTER, JANELA_DURATION_SCALE,
@@ -75,9 +74,7 @@ interface IconEntry {
 
 export class RaceScene extends Phaser.Scene {
   private raceState!: RaceState;
-  private gridState!: GridState;
   private carSetup: CarSetup = DEFAULT_CAR_SETUP;
-  private playerCumulativeTime = 0;
 
   private trackGraphics!: Phaser.GameObjects.Graphics;
   private icons = new Map<string, IconEntry>();
@@ -105,6 +102,7 @@ export class RaceScene extends Phaser.Scene {
   private challengeHalves = { purple: 8, green: 20, amber: 35 };
   private cursorGraphics!: Phaser.GameObjects.Graphics;
   private challengeTimer?: Phaser.Time.TimerEvent;
+  private challengePrepTimer?: Phaser.Time.TimerEvent;
   private preChallengeTimer?: Phaser.Time.TimerEvent;
   private pendingNitro = false;
   private pitAnnounced = false;
@@ -150,8 +148,6 @@ export class RaceScene extends Phaser.Scene {
 
   create(): void {
     this.raceState = createRace(track, this.carSetup);
-    this.gridState = createGridSim();
-    this.playerCumulativeTime = 0;
     this.raceStartTime = Date.now();
     this.raceEnded = false;
     trackEvent('race_start', { trackId: track.id });
@@ -237,10 +233,15 @@ export class RaceScene extends Phaser.Scene {
     g.fillCircle(pit.x, pit.y, 6);
   }
 
+  /**
+   * Unificação core/grid (sessão 11, ver Claude-Racing.md §3/§6 item 5): a
+   * view não mantém mais seu próprio `gridState`/`playerCumulativeTime` em
+   * paralelo — o grid mora dentro do `RaceState` (`core/raceState.ts`), e
+   * `raceStandings()` é a mesma função usada pelo harness headless
+   * internamente (via `state.position`/`gapToAhead`). 1 fonte de verdade só.
+   */
   private currentStandings(): GridStanding[] {
-    return deriveStandings(this.gridState, {
-      id: 'player', label: 'Você', cumulativeTime: this.playerCumulativeTime,
-    });
+    return raceStandings(this.raceState);
   }
 
   private createIcon(standing: GridStanding): IconEntry {
@@ -378,7 +379,12 @@ export class RaceScene extends Phaser.Scene {
     const playerStanding = standings.find((x) => x.isPlayer)!;
     const ev = s.finished ? undefined : currentEvent(s);
     const eventLabel = !ev ? 'Corrida encerrada' : ev.kind === 'pit' ? 'Pit stop' : `${ev.cornerName ?? ''} (${ev.kind})`;
-    const gap = this.displayGap(standings, playerStanding);
+    // gap relativo ao carro imediatamente à frente — vem direto do core
+    // (`raceState.gapToAhead`, derivado do grid via `raceStandings`, ver
+    // Claude-Racing.md §3/§6 item 5). Antes disso a view recalculava o mesmo
+    // valor à parte a partir do grid local (`displayGap`, removido nesta
+    // sessão) — 1 fonte de verdade só agora, sem risco de divergência.
+    const gap = s.gapToAhead;
 
     this.hudPositionText.setText(`P${playerStanding.position}`);
     this.hudLapValueText.setText(`${s.lap}/${track.laps}`);
@@ -418,23 +424,6 @@ export class RaceScene extends Phaser.Scene {
       g.fillPath();
       g.strokePath();
     }
-  }
-
-  /**
-   * Gap exibido no HUD — sempre relativo ao carro imediatamente à frente na
-   * classificação do grid (não ao líder; feedback do PO). Derivado 100% do
-   * grid (`gapToLeader` de cada standing), a mesma fonte do painel lateral —
-   * evita a divergência com o `raceState.gapToAhead` do core (modelo 1D
-   * separado, ver Claude-Racing.md §3). Líder não tem "carro da frente":
-   * mostra a distância (negativa) até o 2º colocado, ou seja, sua vantagem.
-   */
-  private displayGap(standings: GridStanding[], playerStanding: GridStanding): number {
-    if (playerStanding.position === 1) {
-      const second = standings.find((x) => x.position === 2);
-      return second ? -second.gapToLeader : 0;
-    }
-    const ahead = standings.find((x) => x.position === playerStanding.position - 1);
-    return ahead ? playerStanding.gapToLeader - ahead.gapToLeader : this.raceState.gapToAhead;
   }
 
   // ---------- painel inferior (decisões) ----------
@@ -528,12 +517,13 @@ export class RaceScene extends Phaser.Scene {
       return;
     }
     this.clearPanel();
-    // `raceState.position` (core, modelo 1D) pode divergir do grid (12 carros
-    // de verdade, ver Claude-Racing.md §3) — sem esse guard, o jogador já
-    // líder no grid podia receber a oferta de ultrapassagem (bug reportado
-    // pelo PO em playtest: gap negativo grande, mas ainda "líder" pro core).
-    const isGridLeader = this.currentStandings().find((x) => x.isPlayer)?.position === 1;
-    const canOvertake = !isSaida && !isPit && !isGridLeader && canAttemptOvertake(this.raceState.gapToAhead);
+    // Unificação core/grid (sessão 11, ver Claude-Racing.md §3/§6 item 5):
+    // `raceState.position` agora É a posição do grid (mesma fonte, sempre em
+    // sincronia) — não precisa mais consultar o grid separadamente só pra
+    // confirmar que o jogador não é o líder antes de oferecer ultrapassagem
+    // (bug antigo, corrigido estruturalmente aqui, não só por um guard pontual
+    // como na sessão 7).
+    const canOvertake = !isSaida && !isPit && this.raceState.position > 1 && canAttemptOvertake(this.raceState.gapToAhead);
     const hasNitro = this.raceState.nitro > 0;
 
     if (!canOvertake && !hasNitro) {
@@ -632,18 +622,31 @@ export class RaceScene extends Phaser.Scene {
     this.startSweepChallenge();
   }
 
-  /** Pit: mantém o vaivém contínuo original (fora do escopo da revisão CSR2 do T-105). */
+  /**
+   * Pit: mantém o vaivém contínuo original (fora do escopo da revisão CSR2 do
+   * T-105). Rótulo + barra aparecem na hora; o cursor só começa a se mover
+   * depois de CHALLENGE_PREP_MS (tempo de leitura, ver Claude-Racing.md §2.28).
+   */
   private startSweepChallenge(): void {
     this.clearPanel();
     this.challengeMode = 'sweep';
     this.renderChallengeBarAndButton('Pit stop — toque no momento certo!');
-    this.challengeActive = true;
-    this.challengeStartTime = this.time.now;
-    const timeLimit = this.raceState.pendingBoost === 'janela' ? CHALLENGE_TIME_LIMIT_MS * JANELA_DURATION_SCALE : CHALLENGE_TIME_LIMIT_MS;
-    this.challengeTimer = this.time.delayedCall(timeLimit, () => this.onChallengeTapResolved('miss'));
+    this.challengeActive = false;
+    this.challengePrepTimer?.remove();
+    this.challengePrepTimer = this.time.delayedCall(CHALLENGE_PREP_MS, () => {
+      this.challengeActive = true;
+      this.challengeStartTime = this.time.now;
+      const timeLimit = this.raceState.pendingBoost === 'janela' ? CHALLENGE_TIME_LIMIT_MS * JANELA_DURATION_SCALE : CHALLENGE_TIME_LIMIT_MS;
+      this.challengeTimer = this.time.delayedCall(timeLimit, () => this.onChallengeTapResolved('miss'));
+    });
   }
 
-  /** Frenagem e aceleração (T-105): uma única passagem 0->100, sem vaivém contínuo. */
+  /**
+   * Frenagem e aceleração (T-105): uma única passagem 0->100, sem vaivém
+   * contínuo. Mesmo atraso de leitura do sweep (CHALLENGE_PREP_MS) antes do
+   * cursor começar a andar — não interage com JANELA_DURATION_SCALE, que só
+   * escala a duração do desafio em si, não o atraso antes dele começar.
+   */
   private startRampChallenge(label: string): void {
     this.clearPanel();
     this.challengeMode = 'ramp';
@@ -652,9 +655,13 @@ export class RaceScene extends Phaser.Scene {
     const janelaActive = ev.kind !== 'saida' && this.raceState.pendingBoost === 'janela';
     this.challengeDurationMs = janelaActive ? RAMP_DURATION_MS * JANELA_DURATION_SCALE : RAMP_DURATION_MS;
     this.renderChallengeBarAndButton(label);
-    this.challengeActive = true;
-    this.challengeStartTime = this.time.now;
-    this.challengeTimer = this.time.delayedCall(this.challengeDurationMs, () => this.onChallengeTapResolved('miss'));
+    this.challengeActive = false;
+    this.challengePrepTimer?.remove();
+    this.challengePrepTimer = this.time.delayedCall(CHALLENGE_PREP_MS, () => {
+      this.challengeActive = true;
+      this.challengeStartTime = this.time.now;
+      this.challengeTimer = this.time.delayedCall(this.challengeDurationMs, () => this.onChallengeTapResolved('miss'));
+    });
   }
 
   private renderChallengeBarAndButton(label: string): void {
@@ -666,6 +673,9 @@ export class RaceScene extends Phaser.Scene {
     this.panel.add(this.makeButton(16, barY + barH + 20, barW, 56, 'TOCAR', 0xffffff, () => this.handleTap()));
     this.cursorGraphics = this.add.graphics();
     this.panel.add(this.cursorGraphics);
+    // cursor parado na posição inicial durante o prep (CHALLENGE_PREP_MS) — só
+    // passa a se mover quando o desafio de fato ativa (ver startRampChallenge/startSweepChallenge).
+    this.drawCursorAt(0, barX, barY, barW, barH);
   }
 
   /** Desenha as zonas aninhadas (vermelho->amber->verde->roxo) em torno de um centro qualquer (não só 50 — ver aceleração). */
@@ -770,8 +780,12 @@ export class RaceScene extends Phaser.Scene {
   }
 
   private drawCursor(): void {
-    const pos = this.currentCursorPos();
     const barX = 16, barY = 48, barW = CANVAS_WIDTH - 32, barH = 28;
+    this.drawCursorAt(this.currentCursorPos(), barX, barY, barW, barH);
+  }
+
+  /** Desenha o cursor numa posição 0-100 explícita — usado tanto pela animação (drawCursor) quanto pelo cursor parado durante o prep de leitura (CHALLENGE_PREP_MS). */
+  private drawCursorAt(pos: number, barX: number, barY: number, barW: number, barH: number): void {
     const x = barX + (pos / 100) * barW;
     this.cursorGraphics.clear();
     this.cursorGraphics.fillStyle(0xffffff, 1);
@@ -832,7 +846,9 @@ export class RaceScene extends Phaser.Scene {
 
     const nitroUsed = this.pendingNitro ? tryUseNitro(this.raceState) : false;
     const result = resolveCurrent(this.raceState, tier, { nitroUsed });
-    this.playerCumulativeTime -= result.gainSeconds;
+    // (sessão 11) não há mais `playerCumulativeTime` separado na view — o core
+    // já contabiliza o progresso do jogador internamente (`raceState.raceProgress`,
+    // consultado pelo grid via `raceStandings()`).
 
     trackEvent('challenge_result', {
       trackId: track.id, challengeId, kind: ev.kind, tier, nitroUsed, overtakeAttempt,
@@ -881,8 +897,10 @@ export class RaceScene extends Phaser.Scene {
   }
 
   private advanceAndAnimate(): void {
+    // `advance()` agora também avança o grid internamente (sessão 11, ver
+    // Claude-Racing.md §3/§6 item 5) — não precisa mais de um `advanceGrid`
+    // separado aqui em lockstep.
     advance(this.raceState);
-    advanceGrid(this.gridState);
     this.updateIconPositions(true);
     this.time.delayedCall(TWEEN_DURATION_MS, () => this.startEventCycle());
   }
@@ -959,10 +977,11 @@ export class RaceScene extends Phaser.Scene {
         manualAbandon,
       });
 
-      // usa a posição do grid (a mesma que o HUD mostrou o jogo inteiro), não
-      // `output.position` (core, modelo 1D) — evita a divergência já registrada
-      // em Claude-Racing.md §3 pagar/premiar uma posição diferente da que o
-      // jogador viu na tela durante a corrida toda.
+      // `playerStanding.position` e `output.position` são agora garantidamente
+      // o mesmo número (unificação core/grid, sessão 11 — ver Claude-Racing.md
+      // §3/§6 item 5): `output.position` já É a posição derivada do grid, não
+      // mais um modelo escalar em paralelo. Mantido explícito via
+      // `playerStanding` aqui só por já estar em mãos (evita mais uma busca).
       const reward = computeRaceRewards({
         position: playerStanding.position, dnf: output.dnf, goldPenalty: output.goldPenalty,
       });

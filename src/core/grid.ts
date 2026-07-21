@@ -96,11 +96,28 @@ export function createGridSim(rng: () => number = Math.random): GridState {
   return { cars, cumulativeTime };
 }
 
-/** Avança 1 tick (1 evento da corrida) para todos os carros que não são o jogador. */
-export function advanceGrid(state: GridState, rng: () => number = Math.random): void {
+/**
+ * Avança 1 tick (1 evento da corrida) para todos os carros que não são o
+ * jogador.
+ *
+ * `isSaida` (sessão 11, unificação core/grid — ver Claude-Racing.md §3/§6 item
+ * 5): antes desta sessão o grid era só decorativo (HUD/painel de gaps), e
+ * cada tick aplicava o `GAIN` do tier cheio, sem nenhuma noção de tipo de
+ * evento. Agora que a posição do JOGADOR é derivada deste mesmo grid
+ * (`raceState.raceStandings`), essa diferença virou uma assimetria real: o
+ * jogador aplica só METADE do ganho nos eventos de saída (`resolveCurrent`,
+ * `core/raceState.ts`), mas as IAs aplicavam o ganho CHEIO sempre — ou seja,
+ * a cada saída, as IAs "corriam mais rápido" que um jogador de habilidade
+ * equivalente, sem nenhum motivo de design, só porque o grid nunca soube que
+ * saídas valem metade. Corrigido aplicando a mesma regra de metade nas IAs
+ * quando o evento é uma saída, restaurando uma corrida justa (mesmo critério
+ * dos 2 lados). Ver `advance()` em raceState.ts para de onde vem `isSaida`.
+ */
+export function advanceGrid(state: GridState, rng: () => number = Math.random, isSaida = false): void {
   for (const car of state.cars) {
     const tier = rollTier(car.weights, rng);
-    const gain = GAIN[tier] * car.paceFactor;
+    let gain = GAIN[tier] * car.paceFactor;
+    if (isSaida) gain *= 0.5;
     state.cumulativeTime[car.id] -= gain;
   }
 }

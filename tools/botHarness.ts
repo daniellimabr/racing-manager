@@ -2,6 +2,14 @@
  * Harness de bots — roda o core/ headless (sem browser, sem Phaser) para
  * calibrar parâmetros de jogo. Ver Claude-Tech.md, seção 5.
  *
+ * Unificação core/grid (sessão 11, ver Claude-Racing.md §3/§6 item 5):
+ * `advance()` (core/raceState.ts) agora também avança a simulação do grid de
+ * 12 carros internamente — este harness não precisou de NENHUMA mudança de
+ * lógica pra ganhar isso (só chamava `advance(s)` mesmo antes); `output.position`
+ * (via `toRaceOutput`) passa a ser exatamente a mesma posição que a view
+ * mostra no HUD, não mais um modelo escalar em paralelo. Ver medição de
+ * performance antes/depois em Claude-Racing.md.
+ *
  * Uso: npm run bots
  */
 import { readFileSync } from 'node:fs';

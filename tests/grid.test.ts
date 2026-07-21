@@ -1,6 +1,22 @@
 import { describe, it, expect } from 'vitest';
 import { createGridSim, advanceGrid, deriveStandings } from '../src/core/grid.js';
 
+/**
+ * PRNG determinístico simples (LCG) só para testes — corrige o teste flaky
+ * registrado em Claude-Racing.md §3/sessão 9 ("a ordem entre carros de IA
+ * muda"), que usava `Math.random()` sem seed (falhava ~1 em 6 rodadas,
+ * quando por azar a ordem dos 11 carros de IA não mudava em 150 ticks).
+ * Corrigido "de brinde" durante a unificação core/grid (sessão 11) — não era
+ * obrigatório, mas a mesma sessão já estava mexendo pesado neste arquivo.
+ */
+function seededRng(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state * 1664525 + 1013904223) >>> 0;
+    return state / 4294967296;
+  };
+}
+
 describe('createGridSim', () => {
   it('cria 11 carros: 5 equipes x 2 + 1 companheiro de equipe', () => {
     const grid = createGridSim(() => 0.5);
@@ -56,11 +72,14 @@ describe('advanceGrid', () => {
   });
 
   it('ao longo de várias voltas, a ordem entre carros de IA muda (ultrapassagens acontecem)', () => {
-    const grid = createGridSim();
+    // rng seedado (determinístico) — antes era flaky com Math.random() sem seed
+    // (falhava quando, por azar, os 150 ticks não reordenavam ninguém).
+    const rng = seededRng(12345);
+    const grid = createGridSim(rng);
     const initialOrder = deriveStandings(grid, { id: 'player', label: 'J', cumulativeTime: 0 })
       .filter((s) => !s.isPlayer).map((s) => s.id).join(',');
 
-    for (let i = 0; i < 150; i++) advanceGrid(grid);
+    for (let i = 0; i < 150; i++) advanceGrid(grid, rng);
 
     const laterOrder = deriveStandings(grid, { id: 'player', label: 'J', cumulativeTime: 0 })
       .filter((s) => !s.isPlayer).map((s) => s.id).join(',');

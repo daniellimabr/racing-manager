@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { createRace, currentEvent, resolveCurrent, advance, revive, tryUseNitro, toRaceOutput, applyBoost } from '../src/core/raceState.js';
 import {
-  POSITION_UNIT_SECONDS, REPAIR_BOOST_AMOUNT, DAMAGE, GOLD_CRASH_PENALTY,
+  REPAIR_BOOST_AMOUNT, DAMAGE, GOLD_CRASH_PENALTY, PLAYER_GRID_PACE_SCALE,
   MISS_INSTANT_DNF_CHANCE_MIN, MISS_INSTANT_DNF_CHANCE_MAX,
 } from '../src/core/constants.js';
-import type { TrackDef, CarSetup } from '../src/core/types.js';
+import type { TrackDef, CarSetup, RaceState } from '../src/core/types.js';
 
 const track: TrackDef = {
   id: 'test', name: 'Test Track', laps: 2, pitAfterLap: 1,
@@ -13,6 +13,27 @@ const track: TrackDef = {
   corners: [{ id: 'c1', name: 'Curva 1', pathIndex: 0 }, { id: 'c2', name: 'Curva 2', pathIndex: 1 }],
 };
 const setup: CarSetup = { zoneScale: 1, healthMax: 100, nitroCharges: 1 };
+
+/**
+ * Helper de teste (sessão 11, unificação core/grid — ver Claude-Racing.md §3
+ * /§6 item 5): manda todos os 11 carros de IA pra bem longe (não influenciam
+ * mais nada do teste) e planta exatamente 1 "rival" a um tempo conhecido —
+ * dá um cenário 100% determinístico de gap/posição, independente de
+ * jitter/RNG do grid e à prova de futuras recalibrações de `AI_TEAMS`
+ * (`core/grid.ts`), diferente de tentar prever a ordem exata dos 11 carros.
+ *
+ * Também sincroniza `s.position` com o cenário recém-plantado: `position` só
+ * é recalculado dentro de `resolveCurrent` (em eventos não-saída) — sem isso,
+ * o teste compararia o resultado contra um `position` desatualizado (o que a
+ * grid tinha ANTES de plantarmos o rival), o que já mascarou um teste com o
+ * resultado certo pelo motivo errado numa 1ª versão desta função.
+ */
+function pinRival(s: RaceState, rivalId: string, rivalCumulativeTime: number): void {
+  for (const car of s.grid.cars) s.grid.cumulativeTime[car.id] = 1000;
+  s.grid.cumulativeTime[rivalId] = rivalCumulativeTime;
+  const playerTime = -s.raceProgress * PLAYER_GRID_PACE_SCALE; // mesma fórmula de raceStandings()
+  s.position = rivalCumulativeTime < playerTime ? 2 : 1; // só 1 rival de verdade neste cenário
+}
 
 describe('createRace', () => {
   it('inicializa com saúde cheia e sem DNF', () => {
@@ -23,7 +44,7 @@ describe('createRace', () => {
   });
 });
 
-describe('resolveCurrent — gap e posição (progresso cumulativo, T-107)', () => {
+describe('resolveCurrent — gap e posição (unificadas com o grid, sessão 11)', () => {
   it('resultado perfeito reduz o gap mas também desgasta a saúde (decisão do PO, Claude-Racing.md §2.14)', () => {
     const s = createRace(track, setup);
     advance(s); // sai da largada, vai para 1ª frenagem
@@ -33,30 +54,32 @@ describe('resolveCurrent — gap e posição (progresso cumulativo, T-107)', () 
     expect(r.damage).toBeGreaterThan(0);
   });
 
-  it('ultrapassagem acontece quando o progresso acumulado cruza o limiar da próxima posição', () => {
-    // startProgress deixado bem perto do limiar (1 posição = POSITION_UNIT_SECONDS)
-    const s = createRace(track, setup, { startProgress: POSITION_UNIT_SECONDS - 0.05 });
+  it('ultrapassagem acontece quando o progresso do jogador cruza o tempo do carro diretamente à frente', () => {
+    const s = createRace(track, setup);
     advance(s); // 1ª frenagem
-    const r = resolveCurrent(s, 'purple', { nitroUsed: false }); // ganha 0.30s, cruza o limiar
+    pinRival(s, 'alpha-1', -0.15); // único rival de verdade: 0,15s à frente do jogador (tempo 0)
+    const r = resolveCurrent(s, 'purple', { nitroUsed: false }); // ganha 0.30s (frenagem, sem meio-dano de saída) — cruza os 0,15s
     expect(r.positionChanged).toBe('gained');
-    expect(s.position).toBe(5); // largou em 6 (padrão)
-    expect(s.gapToAhead).toBeGreaterThan(0); // gap "fresco" contra o PRÓXIMO carro à frente
+    expect(s.gapToAhead).toBeLessThan(0); // agora à frente do rival
   });
 
-  it('ser ultrapassado acontece quando o progresso acumulado cai de volta pro limiar anterior', () => {
-    // já dentro do "balde" da posição 5 (1 unidade abaixo da largada)
-    const s = createRace(track, setup, { startProgress: POSITION_UNIT_SECONDS + 0.05 });
+  it('ser ultrapassado acontece quando o jogador perde tempo e o rival (antes atrás) volta a ficar à frente', () => {
+    const s = createRace(track, setup);
     advance(s);
-    const r = resolveCurrent(s, 'miss', { nitroUsed: false }); // perde 0.40s, cai de volta pro balde da posição 6
-    expect(s.gapToAhead).toBeGreaterThan(0);
+    pinRival(s, 'alpha-1', 0.10); // rival 0,10s atrás — jogador lidera por enquanto
+    const r = resolveCurrent(s, 'miss', { nitroUsed: false }); // perde 0.40s — passa a ficar atrás do rival
     expect(r.positionChanged).toBe('lost');
-    expect(s.position).toBe(6);
+    expect(s.gapToAhead).toBeGreaterThan(0); // agora atrás do rival
   });
 
   it('a posição inicial já reflete o startProgress (sem esperar o 1º evento)', () => {
-    // 2 unidades inteiras de vantagem acumulada = 2 posições à frente da largada padrão
-    const s = createRace(track, setup, { startProgress: 2 * POSITION_UNIT_SECONDS + 0.05 });
-    expect(s.position).toBe(4); // largada padrão é 6; 2 unidades de vantagem = 2 posições
+    // vantagem bem maior que o espalhamento inicial do grid (~±2,4s, ver core/grid.ts)
+    // garante virar líder (ou último) na criação, sem precisar de nenhum evento resolvido.
+    const ahead = createRace(track, setup, { startProgress: 10 });
+    expect(ahead.position).toBe(1);
+
+    const behind = createRace(track, setup, { startProgress: -10 });
+    expect(behind.position).toBe(12);
   });
 
   it('nitro melhora um resultado bom em +10% e reduz a penalidade de um erro', () => {

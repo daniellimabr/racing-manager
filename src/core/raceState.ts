@@ -3,19 +3,46 @@ import type {
   ResolveOptions, ResolveResult, RaceOutput,
 } from './types.js';
 import { buildEventSequence } from './track.js';
+import { createGridSim, advanceGrid, deriveStandings } from './grid.js';
+import type { GridStanding } from './grid.js';
 import {
-  GAIN, DAMAGE, NITRO_GOOD_BONUS, NITRO_BAD_RELIEF, POSITION_UNIT_SECONDS,
-  REPAIR_BOOST_AMOUNT, ERROR_RECOVERY_RELIEF,
+  GAIN, DAMAGE, NITRO_GOOD_BONUS, NITRO_BAD_RELIEF,
+  REPAIR_BOOST_AMOUNT, ERROR_RECOVERY_RELIEF, PLAYER_GRID_PACE_SCALE,
   MISS_INSTANT_DNF_CHANCE_MIN, MISS_INSTANT_DNF_CHANCE_MAX, GOLD_CRASH_PENALTY,
 } from './constants.js';
+
+/**
+ * Unificação core/grid (sessão 11, ver Claude-Racing.md §3/§6 item 5): o grid
+ * de 12 carros (`core/grid.ts`) é agora a ÚNICA fonte de verdade de "onde o
+ * jogador está na corrida" — o jogador entra na simulação como mais um carro,
+ * a partir do seu próprio `raceProgress` (não um pace fixo como as IAs).
+ * `RaceState.position`/`gapToAhead` deixam de ser calculados por uma fórmula
+ * escalar em paralelo (`POSITION_UNIT_SECONDS`, removida) — passam a ser só um
+ * cache do último valor derivado daqui, atualizado em `resolveCurrent`.
+ *
+ * `cumulativeTime` do jogador no grid é `-raceProgress`: `raceProgress`
+ * acumula ganho (positivo = mais rápido), enquanto no grid tempo MENOR =
+ * carro mais à frente (mesma convenção já usada pelas IAs em `advanceGrid`,
+ * que faz `cumulativeTime -= gain`) — os dois modelos já usavam a mesma
+ * álgebra internamente (a view somava `-gainSeconds` no seu próprio
+ * `playerCumulativeTime` para desenhar os ícones); agora é uma única fonte,
+ * não duas contas equivalentes mantidas em paralelo.
+ */
+export function raceStandings(state: RaceState): GridStanding[] {
+  return deriveStandings(state.grid, {
+    id: 'player', label: 'Você', cumulativeTime: -state.raceProgress * PLAYER_GRID_PACE_SCALE,
+  });
+}
+
+function derivePlayerStanding(state: RaceState): GridStanding {
+  return raceStandings(state).find((s) => s.isPlayer)!;
+}
 
 export function createRace(
   track: TrackDef,
   setup: CarSetup,
-  opts: { gridSize?: number; startPosition?: number; startProgress?: number } = {}
+  opts: { startProgress?: number; rng?: () => number } = {}
 ): RaceState {
-  const startPosition = opts.startPosition ?? 6;
-  const gridSize = opts.gridSize ?? 12;
   const raceProgress = opts.startProgress ?? 0;
   const state: RaceState = {
     track,
@@ -24,9 +51,8 @@ export function createRace(
     lap: 1,
     health: setup.healthMax,
     healthMax: setup.healthMax,
-    position: positionFromProgress(startPosition, raceProgress, gridSize),
-    startPosition,
-    gridSize,
+    position: 1, // recalculado abaixo, já com o grid pronto
+    grid: createGridSim(opts.rng),
     raceProgress,
     gapToAhead: 0, // recalculado abaixo
     nitro: setup.nitroCharges,
@@ -39,26 +65,30 @@ export function createRace(
     goldPenalty: 0,
     log: [],
   };
+  // posição/gap iniciais já refletem o startProgress (se houver), sem esperar
+  // o 1º evento resolver — mesmo espírito do modelo escalar anterior.
+  state.position = derivePlayerStanding(state).position;
   state.gapToAhead = computeGapToAhead(state);
   return state;
 }
 
-/** Posição derivada do progresso acumulado — mesma fórmula usada na largada e a cada evento resolvido. */
-function positionFromProgress(startPosition: number, raceProgress: number, gridSize: number): number {
-  const steps = Math.floor(raceProgress / POSITION_UNIT_SECONDS);
-  return Math.min(gridSize, Math.max(1, startPosition - steps));
-}
-
 /**
- * Segundos de vantagem que ainda faltam pra alcançar a próxima posição
- * (positivo = atrás, negativo = à frente) — derivado de `raceProgress`, nunca
- * armazenado independentemente. Ver POSITION_UNIT_SECONDS em constants.ts.
+ * Segundos de vantagem/atraso até o carro imediatamente à frente na
+ * classificação (positivo = atrás, negativo = à frente) — derivado do grid a
+ * cada chamada, nunca armazenado como um cálculo independente. Idêntico ao
+ * que a HUD (`RaceScene.displayGap`, antes desta sessão) já calculava a partir
+ * do grid — a duplicação era exatamente a divergência registrada em
+ * Claude-Racing.md §3; agora existe 1 só lugar de verdade.
  */
 function computeGapToAhead(state: RaceState): number {
-  if (state.position <= 1) return -POSITION_UNIT_SECONDS; // já é o líder, não há "carro à frente"
-  const stepsToNextPosition = state.startPosition - (state.position - 1);
-  const thresholdForNextPosition = stepsToNextPosition * POSITION_UNIT_SECONDS;
-  return thresholdForNextPosition - state.raceProgress;
+  const standings = raceStandings(state);
+  const player = standings.find((s) => s.isPlayer)!;
+  if (player.position === 1) {
+    const second = standings.find((s) => s.position === 2);
+    return second ? -second.gapToLeader : 0; // líder: distância (negativa) até o 2º
+  }
+  const ahead = standings.find((s) => s.position === player.position - 1);
+  return ahead ? player.gapToLeader - ahead.gapToLeader : 0;
 }
 
 export function currentEvent(state: RaceState): RaceEvent {
@@ -117,7 +147,7 @@ export function resolveCurrent(state: RaceState, tier: Tier, opts: ResolveOption
 
   let positionChanged: 'gained' | 'lost' | null = null;
   if (!isSaida) {
-    const newPosition = positionFromProgress(state.startPosition, state.raceProgress, state.gridSize);
+    const newPosition = derivePlayerStanding(state).position;
     if (newPosition < state.position) positionChanged = 'gained';
     else if (newPosition > state.position) positionChanged = 'lost';
     state.position = newPosition;
@@ -153,14 +183,27 @@ export function resolveCurrent(state: RaceState, tier: Tier, opts: ResolveOption
   return { tier, gainSeconds: gain, damage: appliedDmg, positionChanged, message };
 }
 
-/** Avança para o próximo evento da corrida. Marca `finished` ao acabar a pista. */
-export function advance(state: RaceState): void {
+/**
+ * Avança para o próximo evento da corrida. Marca `finished` ao acabar a
+ * pista. Também avança 1 tick a simulação do grid (as 11 IAs) — antes disso
+ * era responsabilidade da view (`advanceGrid` chamado à parte, em lockstep,
+ * depois de `advance()`); unificado aqui pra que o harness headless
+ * (`tools/botHarness.ts`, que só chama `advance()`) ganhe a mesma simulação
+ * de grid "de graça", sem precisar de nenhuma mudança no laço do harness.
+ * `rng` é injetável (mesmo padrão de `resolveCurrent`) — default `Math.random`.
+ */
+export function advance(state: RaceState, rng: () => number = Math.random): void {
+  // capturado ANTES do índice avançar: precisamos saber se o evento que
+  // ACABOU de ser resolvido era uma saída, pra aplicar a mesma regra de
+  // "metade do ganho" nas IAs (ver comentário de `advanceGrid` em grid.ts).
+  const wasSaida = currentEvent(state).kind === 'saida';
   state.eventIndex += 1;
   if (state.eventIndex >= state.events.length) {
     state.finished = true;
-    return;
+  } else {
+    state.lap = state.events[state.eventIndex].lap;
   }
-  state.lap = state.events[state.eventIndex].lap;
+  advanceGrid(state.grid, rng, wasSaida);
 }
 
 /** Volta à corrida após DNF, 1x por corrida, com metade da saúde. */

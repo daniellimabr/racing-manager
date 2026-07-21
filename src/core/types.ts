@@ -1,3 +1,5 @@
+import type { GridState } from './grid.js';
+
 export type Tier = 'purple' | 'green' | 'amber' | 'red' | 'miss';
 
 export type EventKind = 'saida' | 'frenagem' | 'pit';
@@ -67,12 +69,32 @@ export interface RaceState {
   lap: number;
   health: number;
   healthMax: number;
+  /**
+   * Posição do jogador na classificação de 12 carros — DERIVADA do grid (ver
+   * `grid` abaixo + `raceStandings()` em raceState.ts), não mais calculada por
+   * uma fórmula escalar em paralelo. Unificação feita na sessão 11 (ver
+   * Claude-Racing.md §3/§6 item 5): antes existiam 2 modelos de posição
+   * (este campo, calculado por `POSITION_UNIT_SECONDS`, e o grid usado só pela
+   * view) que podiam divergir entre si — já causou 2 bugs reais (líder
+   * recebendo oferta de ultrapassagem; dúvida de qual posição pagar a
+   * recompensa do Manager). Agora `position`/`gapToAhead` são só um cache do
+   * último valor derivado do grid (atualizado em `resolveCurrent`/`createRace`),
+   * nunca uma fonte independente.
+   */
   position: number;
-  startPosition: number;
-  gridSize: number;
-  /** soma acumulada (nunca reseta) do ganho/perda de tempo desde a largada — define a posição */
+  /**
+   * Simulação dos outros 11 carros (10 oponentes + companheiro de equipe) —
+   * ver `core/grid.ts`. Antes vivia só na view (`RaceScene.gridState`); agora
+   * mora aqui porque é a fonte de verdade única de onde vem a posição/gap do
+   * jogador, usada tanto pelo harness headless (`tools/botHarness.ts`) quanto
+   * pela view (HUD/painel de gaps). O jogador entra na simulação através do
+   * seu próprio `raceProgress` (ver `raceStandings()`), não como mais um carro
+   * do array `grid.cars`.
+   */
+  grid: GridState;
+  /** soma acumulada (nunca reseta) do ganho/perda de tempo desde a largada — define a posição via o grid (ver raceStandings) */
   raceProgress: number;
-  gapToAhead: number; // segundos: positivo = atrás, negativo = à frente (derivado de raceProgress, ver resolveCurrent)
+  gapToAhead: number; // segundos: positivo = atrás, negativo = à frente (derivado do grid, ver resolveCurrent)
   nitro: number;
   usedRevive: boolean;
   pendingBoost: BoostId | null;

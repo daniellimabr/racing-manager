@@ -86,6 +86,41 @@ export const GOLD_CRASH_PENALTY = 50;
  */
 export const HEALTH_DIFFICULTY_FLOOR = 0.6;
 
+/**
+ * Fator de escala aplicado ao `raceProgress` do jogador ao entrar no grid como
+ * "mais um carro" (ver `raceStandings()`, `core/raceState.ts`) — calibração
+ * equivalente em espírito ao antigo `POSITION_UNIT_SECONDS` (removido nesta
+ * sessão, unificação core/grid, ver Claude-Racing.md §3/§6 item 5), só que
+ * agora expressa como "quanto o progresso do jogador vale em segundos de
+ * grid" (mesma unidade das IAs), não mais como um divisor de "unidades de
+ * posição" arbitrárias e desconectadas do pace real dos oponentes.
+ *
+ * Necessário porque a frenagem do jogador combina 2 sorteios independentes
+ * (`combineTiers`, T-105/CSR2) — a mesma regressão à média que já tinha
+ * forçado recalibrar `POSITION_UNIT_SECONDS` de 3.7→4.25 no T-107 rodada 2 —
+ * enquanto as IAs do grid sempre sortearam só 1 tier por evento (não têm o
+ * conceito de "2 sub-desafios"). Sem este fator, um perfil "Skilled" vencia
+ * ~86% das corridas contra o grid de verdade (meta: 30–40%, Claude-Tech.md
+ * §5) — bem mais que a vantagem real de habilidade justificaria, porque a
+ * combinação de 2 sorteios também empurra sistematicamente o tier médio do
+ * jogador pra cima do que o MESMO perfil produziria num sorteio único (que é
+ * como as IAs continuam operando).
+ *
+ * Calibrado via harness nesta sessão (busca binária manual, 500 corridas/perfil
+ * por tentativa): 1.0→86% vitórias do Skilled, 0.92→48,8%, 0.85→11,2%,
+ * 0.72→0%. **0.89** ficou consistente em 3 rodadas (~30-33% vitórias do
+ * Skilled) contra as metas da sessão 10 (Claude-Racing.md §2.27): Casual DNF
+ * 20–35% ✅ (~30-34%), Médio DNF 5–15% ✅ (~7-9%), Skilled vitórias 30–40% ✅.
+ * **Temerário ficou na borda** (27,8–30,6% nas 3 rodadas, meta 30–45%) — mais
+ * perto do piso da meta que confortavelmente dentro; registrado como pendência
+ * de calibração fina (mesmo espírito de `HEALTH_DIFFICULTY_FLOOR`: aceitável
+ * por ora, mas sinalizado pra revisão após playtest humano em vez de caçar um
+ * ajuste "perfeito" só com o harness). Extremamente sensível nesta faixa
+ * (mesma fragilidade já registrada pro extinto `POSITION_UNIT_SECONDS`, ver
+ * Claude-Racing.md §3) — não afinar mais sem dado humano real.
+ */
+export const PLAYER_GRID_PACE_SCALE = 0.89;
+
 /** Boost "reparo rápido" (CLAUDE.md §6.1): saúde recuperada na próxima frenagem/pit após escolhido. */
 export const REPAIR_BOOST_AMOUNT = 15;
 
@@ -114,33 +149,20 @@ export const MAX_SCALE = 1.5;
 export const ZONE_BASE_HALVES = { purple: 6, green: 20, amber: 35 };
 
 /**
- * Segundos de vantagem acumulada equivalentes a 1 posição no grid.
- *
- * T-107 (rodada 1, ver Claude-Racing.md): a 1ª tentativa de calibração usava
- * cruzamento de sinal do gap com reset pra um valor fixo a cada ultrapassagem.
- * Isso saturava — o número de ultrapassagens por corrida NÃO escalava com a
- * habilidade do perfil (Skilled e Médio convergiam pro mesmo ~2 por corrida),
- * porque a maior parte do progresso teórico se perdia em reversões de curto
- * prazo do passeio aleatório. Trocado por um modelo de progresso cumulativo
- * (`RaceState.raceProgress`, nunca reseta): a posição é `startPosition -
- * floor(raceProgress / POSITION_UNIT_SECONDS)`. Calibrado via harness (bots)
- * pra Skilled vencer 30–40% das corridas: 3.7 → ~36%.
- *
- * T-107 (rodada 2, ver Claude-Racing.md §2.13): a frenagem passou a ser 2
- * sub-desafios combinados (`combineTiers`, T-105/CSR2) — isso reduz bastante
- * a frequência de resultados vermelho/miss em ~metade dos eventos da corrida
- * (regressão à média de 2 sorteios), o que inflou o ganho médio de perfis já
- * bons desproporcionalmente (Skilled foi de 31% pra 99% de vitórias com o
- * valor antigo). Recalibrado de 3.7 → 4.25 (empírico, harness) pra trazer
- * Skilled de volta a 30–40%. Isso puxou o Médio um pouco além da meta
- * original (pos. média 3.67, meta era 4º–7º) e zerou quase toda taxa de DNF
- * em todos os perfis — o dano de frenagem também sofre a mesma regressão à
- * média. Ambos ficam registrados como pendência pra revisão após playtest
- * humano (T-109/T-110), não foram forçados a caber com um 2º parâmetro
- * porque o modelo se mostrou sensível nesta faixa (99% -> 1% de vitória do
- * Skilled entre 3.7 e 4.6) — não é seguro afinar mais sem dado humano real.
+ * ~~POSITION_UNIT_SECONDS~~ — REMOVIDA na sessão 11 (unificação core/grid, ver
+ * Claude-Racing.md §3/§6 item 5). Era o parâmetro do modelo escalar antigo de
+ * posição (`startPosition - floor(raceProgress / POSITION_UNIT_SECONDS)`),
+ * calculado em paralelo ao grid de 12 carros (`core/grid.ts`) — os 2 modelos
+ * já haviam divergido 2x na prática (líder recebendo oferta de ultrapassagem;
+ * dúvida de qual posição pagar a recompensa do Manager). A posição agora vem
+ * SEMPRE do grid (`raceStandings()` em `core/raceState.ts`), com o jogador
+ * entrando na simulação como mais um carro a partir do seu próprio
+ * `raceProgress` — não sobrou nenhum uso desta constante em código de
+ * produção; mantida fora do arquivo de propósito (não só comentada) para não
+ * haver 2 mecanismos "quase iguais" tentadores de usar por engano numa sessão
+ * futura. Se precisar do valor histórico (4.25, calibrado via harness pro
+ * Skilled vencer 30–40%), ver o histórico do arquivo antes desta sessão.
  */
-export const POSITION_UNIT_SECONDS = 4.25;
 
 /**
  * valores padrão do carro do jogador até o Manager alimentar o RaceInput de
