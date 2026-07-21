@@ -81,11 +81,16 @@ export function createGridSim(rng: () => number = Math.random): GridState {
   });
 
   // grid de largada: ordena por pace e espalha em ~0.4s por posição, centrado
-  // no jogador (tempo 0) — aproxima o padrão de largada P6/12 do core (ver raceState.createRace)
+  // no jogador (tempo 0) — aproxima o padrão de largada P6/12 do core (ver raceState.createRace).
+  // O jogador ocupa o tempo 0 sozinho (ver `playerCumulativeTime = 0` em RaceScene) — os 11
+  // carros de IA pulam esse valor (índice 5 vai pra +0.4, não pra 0) pra não empatar com ele.
+  // Sem esse pulo, o carro de IA de pace mediano caía exatamente em (5-5)*0.4 = 0, empatando
+  // com o jogador toda largada e gerando 2 posições com o mesmo gap exibido (bug de playtest).
   const rankedByPace = [...cars].sort((a, b) => b.paceFactor - a.paceFactor);
   const cumulativeTime: Record<string, number> = {};
   rankedByPace.forEach((car, i) => {
-    cumulativeTime[car.id] = (i - 5) * 0.4;
+    const slot = i < 5 ? i - 5 : i - 4;
+    cumulativeTime[car.id] = slot * 0.4;
   });
 
   return { cars, cumulativeTime };
