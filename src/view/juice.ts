@@ -55,6 +55,11 @@ class JuiceEngine {
   good(): void { this.tone(760, 100, 'sine', 0.12); }
   crash(): void { this.noiseBurst(280, 0.28); }
   click(): void { this.tone(420, 60, 'triangle', 0.1); }
+  /** Anúncio de entrada no pit — 2 tons descendentes, distinto dos demais SFX (Claude-Racing.md §2.21). */
+  pitEntry(): void {
+    this.tone(500, 140, 'square', 0.15);
+    setTimeout(() => this.tone(350, 180, 'square', 0.15), 150);
+  }
 
   /** Vibration API — Android apenas; em iOS/desktop sem suporte, é um no-op silencioso. */
   vibrate(pattern: number | number[]): void {

@@ -19,6 +19,13 @@ export const TRACK_RECT = {
 export const CURSOR_SWEEP_PERIOD_MS = 900;
 /** tempo limite (ms) para apertar o botão antes de contar como "miss" automático — usado só no pit */
 export const CHALLENGE_TIME_LIMIT_MS = 1500;
+/**
+ * Tempo limite (ms) pra decidir ultrapassagem/nitro antes do desafio de timing.
+ * Expirando, assume "não" e o jogo segue — feedback de playtest do PO: a tela
+ * de decisão pausava indefinidamente, diferente do resto do jogo, que sempre
+ * tem pressão de tempo (Claude-Racing.md §2.22).
+ */
+export const PRE_CHALLENGE_TIME_LIMIT_MS = 3000;
 
 /**
  * T-105 (proposta CSR2, validada na demo greybox — ver Claude-Racing.md §2.10):
@@ -64,6 +71,16 @@ export const BOOST_LABELS: Record<BoostId, string> = {
   reparo_rapido: 'Reparo rápido',
   nitro_extra: 'Nitro extra',
   recuperacao_erro: 'Recuperação de erro',
+};
+
+/** Feedback de playtest do PO: os nomes dos boosts não deixavam claro o efeito (Claude-Racing.md §2.21). */
+export const BOOST_DESCRIPTIONS: Record<BoostId, string> = {
+  pneu: 'Aumenta a zona verde/roxa na próxima frenagem/pit',
+  freio: 'Reduz o dano se errar a próxima frenagem/pit',
+  janela: 'Mais tempo de reação no próximo desafio de frenagem/pit',
+  reparo_rapido: 'Recupera saúde na próxima frenagem/pit resolvida',
+  nitro_extra: '+1 carga de nitro, concedida na hora',
+  recuperacao_erro: 'Reduz a perda de tempo do seu próximo erro (vermelho/miss)',
 };
 
 /** Boost "janela ampliada": fator de aumento no tempo disponível do próximo desafio de frenagem/pit. */

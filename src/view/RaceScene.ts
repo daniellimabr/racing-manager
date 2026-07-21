@@ -11,8 +11,8 @@ import type { GridState, GridStanding } from '../core/grid.js';
 import { normalizedToScreen, pathIndexToT, pointAtT } from './pathUtils.js';
 import {
   TRACK_RECT, CANVAS_WIDTH, CANVAS_HEIGHT, HUD_HEIGHT, PANEL_HEIGHT,
-  CURSOR_SWEEP_PERIOD_MS, CHALLENGE_TIME_LIMIT_MS, TWEEN_DURATION_MS,
-  SECONDS_PER_LAP_VISUAL, MAX_VISUAL_GAP_SECONDS, TIER_COLORS, BOOST_LABELS, TEAM_COLORS,
+  CURSOR_SWEEP_PERIOD_MS, CHALLENGE_TIME_LIMIT_MS, PRE_CHALLENGE_TIME_LIMIT_MS, TWEEN_DURATION_MS,
+  SECONDS_PER_LAP_VISUAL, MAX_VISUAL_GAP_SECONDS, TIER_COLORS, BOOST_LABELS, BOOST_DESCRIPTIONS, TEAM_COLORS,
   DEFAULT_CAR_SETUP, DEFAULT_PIT_CREW_QUALITY,
   RAMP_DURATION_MS, ACCEL_CENTER, BRAKE_CENTER, JANELA_DURATION_SCALE,
   LARGADA_PREP_MS, LARGADA_LIGHT_INTERVAL_MS, LARGADA_HOLD_MIN_MS, LARGADA_HOLD_MAX_MS,
@@ -86,8 +86,9 @@ export class RaceScene extends Phaser.Scene {
   private challengeHalves = { purple: 8, green: 20, amber: 35 };
   private cursorGraphics!: Phaser.GameObjects.Graphics;
   private challengeTimer?: Phaser.Time.TimerEvent;
+  private preChallengeTimer?: Phaser.Time.TimerEvent;
   private pendingNitro = false;
-  private pendingOvertake = false;
+  private pitAnnounced = false;
   private raceStartTime = 0;
   private raceEnded = false;
 
@@ -246,6 +247,12 @@ export class RaceScene extends Phaser.Scene {
     const s = this.raceState;
     const referenceEvent = s.finished ? s.events[s.events.length - 1] : currentEvent(s);
     const refT = pathIndexToT(pathIndexForEvent(referenceEvent), track.path.length);
+    // `refT` é a posição do JOGADOR (deriva do evento atual dele), não do líder.
+    // Cada carro precisa ser deslocado pelo gap RELATIVO AO JOGADOR, não pelo
+    // `gapToLeader` bruto — senão o líder (gapToLeader = 0) cai exatamente em
+    // cima de `refT`, ou seja, em cima do próprio jogador, ficando mais errado
+    // quanto maior o gap do jogador (bug reportado em playtest, Claude-Racing.md §2.22).
+    const playerGapToLeader = standings.find((x) => x.isPlayer)?.gapToLeader ?? 0;
 
     for (const standing of standings) {
       let entry = this.icons.get(standing.id);
@@ -258,7 +265,8 @@ export class RaceScene extends Phaser.Scene {
       entry.circle.setFillStyle(this.iconColor(standing));
       entry.label.setText(String(standing.position));
 
-      const clampedGap = Math.min(standing.gapToLeader, MAX_VISUAL_GAP_SECONDS);
+      const gapToPlayer = standing.gapToLeader - playerGapToLeader;
+      const clampedGap = Math.max(-MAX_VISUAL_GAP_SECONDS, Math.min(MAX_VISUAL_GAP_SECONDS, gapToPlayer));
       const t = refT - clampedGap / SECONDS_PER_LAP_VISUAL;
       const point = pointAtT(track.path, t);
       const screen = normalizedToScreen(point, TRACK_RECT);
@@ -434,7 +442,7 @@ export class RaceScene extends Phaser.Scene {
 
     const ev = currentEvent(this.raceState);
     this.pendingNitro = false;
-    this.pendingOvertake = false;
+    this.pitAnnounced = false;
 
     if (ev.boostEligible) {
       this.showBoostChoice(ev);
@@ -449,19 +457,44 @@ export class RaceScene extends Phaser.Scene {
     const allBoosts: BoostId[] = ['pneu', 'freio', 'janela', 'reparo_rapido', 'nitro_extra', 'recuperacao_erro'];
     const options: BoostId[] = allBoosts.sort(() => Math.random() - 0.5).slice(0, 3);
     options.forEach((id, i) => {
-      const btn = this.makeButton(16, 44 + i * 48, CANVAS_WIDTH - 32, 40, BOOST_LABELS[id], 0xffd54f, () => {
+      const rowY = 40 + i * 60;
+      const btn = this.makeButton(16, rowY, CANVAS_WIDTH - 32, 40, BOOST_LABELS[id], 0xffd54f, () => {
         trackEvent('boost_chosen', { trackId: track.id, lap: this.raceState.lap, options, chosen: id });
         applyBoost(this.raceState, id);
         this.showPreChallenge(ev);
       });
       this.panel.add(btn);
+      // Feedback do PO: os nomes dos boosts não deixavam claro o efeito (Claude-Racing.md §2.21).
+      this.panel.add(this.add.text(16, rowY + 42, BOOST_DESCRIPTIONS[id], { fontSize: '11px', color: '#aaa' }));
     });
   }
 
-  private showPreChallenge(ev: RaceEvent): void {
+  /**
+   * Banner curto ao entrar no pit — feedback de playtest do PO: a atenção
+   * fica presa no botão do desafio e o pit passa despercebido (Claude-Racing.md §2.21).
+   */
+  private showPitAnnouncement(ev: RaceEvent): void {
     this.clearPanel();
+    this.panel.add(this.add.text(CANVAS_WIDTH / 2, 60, 'BOXES!', {
+      fontSize: '40px', color: '#64b5f6', fontStyle: 'bold',
+    }).setOrigin(0.5));
+    this.panel.add(this.add.text(CANVAS_WIDTH / 2, 110, 'Entrando no pit stop...', {
+      fontSize: '14px', color: '#fff',
+    }).setOrigin(0.5));
+    this.cameras.main.flash(250, 30, 60, 100);
+    juice.pitEntry();
+    this.time.delayedCall(900, () => this.showPreChallenge(ev));
+  }
+
+  private showPreChallenge(ev: RaceEvent): void {
     const isSaida = ev.kind === 'saida';
     const isPit = ev.kind === 'pit';
+    if (isPit && !this.pitAnnounced) {
+      this.pitAnnounced = true;
+      this.showPitAnnouncement(ev);
+      return;
+    }
+    this.clearPanel();
     // `raceState.position` (core, modelo 1D) pode divergir do grid (12 carros
     // de verdade, ver Claude-Racing.md §3) — sem esse guard, o jogador já
     // líder no grid podia receber a oferta de ultrapassagem (bug reportado
@@ -476,46 +509,57 @@ export class RaceScene extends Phaser.Scene {
     }
 
     this.pendingNitro = false;
-    this.pendingOvertake = false;
-    let y = 12;
-    this.panel.add(this.add.text(16, y, `${ev.cornerName ?? 'Largada'} — antes de encarar:`, { fontSize: '14px', color: '#fff' }));
-    y += 36;
-
-    let overtakeBtn: Phaser.GameObjects.Container | undefined;
     if (canOvertake) {
-      overtakeBtn = this.makeButton(16, y, CANVAS_WIDTH - 32, 40, 'Tentar ultrapassagem: NÃO', 0xff8a65, () => {
-        this.pendingOvertake = !this.pendingOvertake;
-        overtakeBtn!.getAt<Phaser.GameObjects.Text>(1).setText(`Tentar ultrapassagem: ${this.pendingOvertake ? 'SIM' : 'NÃO'}`);
-      });
-      this.panel.add(overtakeBtn);
-      y += 48;
+      this.showOvertakeStep(ev, hasNitro);
+    } else {
+      this.showNitroStep(ev);
     }
+  }
 
-    if (hasNitro) {
-      // Feedback do PO: o toggle+confirmar do nitro não estava claro — agora são
-      // 2 botões diretos (Sim/Não), cada um já define a opção e avança pro desafio.
-      const nitroWord = this.raceState.nitro === 1 ? 'disponível' : 'disponíveis';
-      this.panel.add(this.add.text(16, y, `Usar nitro? (${this.raceState.nitro} ${nitroWord})`, {
-        fontSize: '13px', color: '#ccc',
-      }));
-      y += 22;
-      const gap = 8;
-      const halfW = (CANVAS_WIDTH - 32 - gap) / 2;
-      const goWithNitro = (useNitro: boolean) => {
-        this.pendingNitro = useNitro;
-        if (this.pendingOvertake) setOvertakeAttempt(this.raceState, true);
-        this.startTimingChallenge(ev);
-      };
-      this.panel.add(this.makeButton(16, y, halfW, 44, 'Nitro: SIM', 0x64b5f6, () => goWithNitro(true)));
-      this.panel.add(this.makeButton(16 + halfW + gap, y, halfW, 44, 'Nitro: NÃO', 0x455a64, () => goWithNitro(false)));
-      return;
-    }
+  /**
+   * Feedback de playtest do PO (Claude-Racing.md §2.22): o toggle de
+   * ultrapassagem pausava o jogo indefinidamente, diferente do resto do jogo
+   * (que sempre tem pressão de tempo). Agora são 2 botões diretos, com o
+   * mesmo timeout de decisão do nitro — expira, assume "não" e segue.
+   */
+  private showOvertakeStep(ev: RaceEvent, hasNitro: boolean): void {
+    this.clearPanel();
+    this.panel.add(this.add.text(16, 12, `${ev.cornerName ?? 'Largada'} — tentar ultrapassagem?`, {
+      fontSize: '14px', color: '#fff',
+    }));
+    const y = 48;
+    const gap = 8;
+    const halfW = (CANVAS_WIDTH - 32 - gap) / 2;
+    const decide = (attempt: boolean) => {
+      this.preChallengeTimer?.remove();
+      if (attempt) setOvertakeAttempt(this.raceState, true);
+      if (hasNitro) this.showNitroStep(ev);
+      else this.startTimingChallenge(ev);
+    };
+    this.panel.add(this.makeButton(16, y, halfW, 44, 'Ultrapassagem: SIM', 0xff8a65, () => decide(true)));
+    this.panel.add(this.makeButton(16 + halfW + gap, y, halfW, 44, 'Ultrapassagem: NÃO', 0x455a64, () => decide(false)));
+    this.preChallengeTimer = this.time.delayedCall(PRE_CHALLENGE_TIME_LIMIT_MS, () => decide(false));
+  }
 
-    const confirmBtn = this.makeButton(16, y, CANVAS_WIDTH - 32, 40, 'Confirmar', 0x81c784, () => {
-      if (this.pendingOvertake) setOvertakeAttempt(this.raceState, true);
+  private showNitroStep(ev: RaceEvent): void {
+    this.clearPanel();
+    // Feedback do PO: o toggle+confirmar do nitro não estava claro — 2 botões
+    // diretos (Sim/Não), cada um já define a opção e avança pro desafio.
+    const nitroWord = this.raceState.nitro === 1 ? 'disponível' : 'disponíveis';
+    this.panel.add(this.add.text(16, 12, `Usar nitro? (${this.raceState.nitro} ${nitroWord})`, {
+      fontSize: '13px', color: '#ccc',
+    }));
+    const y = 40;
+    const gap = 8;
+    const halfW = (CANVAS_WIDTH - 32 - gap) / 2;
+    const decide = (useNitro: boolean) => {
+      this.preChallengeTimer?.remove();
+      this.pendingNitro = useNitro;
       this.startTimingChallenge(ev);
-    });
-    this.panel.add(confirmBtn);
+    };
+    this.panel.add(this.makeButton(16, y, halfW, 44, 'Nitro: SIM', 0x64b5f6, () => decide(true)));
+    this.panel.add(this.makeButton(16 + halfW + gap, y, halfW, 44, 'Nitro: NÃO', 0x455a64, () => decide(false)));
+    this.preChallengeTimer = this.time.delayedCall(PRE_CHALLENGE_TIME_LIMIT_MS, () => decide(false));
   }
 
   private startTimingChallenge(ev: RaceEvent): void {

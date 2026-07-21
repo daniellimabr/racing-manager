@@ -215,6 +215,8 @@ E-301 Sede/escritórios (produção passiva + coleta) · E-302 Pilotos e equipe/
 
 ## 11. Próximos passos imediatos
 
-1. **T-109/T-110 — executar o roteiro de playtest** (Claude-Racing.md §2.11) com o PO + 2 irmãos. É o item que efetivamente falta para o Gate 1 — todo o resto do M1 já está implementado e publicado.
-2. Validar com dado humano real os desvios de balanceamento já registrados (DNF quase inexistente, Médio ligeiramente acima da meta, sensibilidade de `POSITION_UNIT_SECONDS`) antes de qualquer novo ajuste às cegas via harness.
+**Atualizado 2026-07-21 (sessão 9 da trilha Racing — ver Claude-Racing.md §2.21–2.24 pro detalhe completo):** T-110 já rodou 2 das 3 sessões (PO sozinho); faltam os 2 irmãos pro Gate 1 completo. O playtest já confirmou com dado humano real o desvio de balanceamento suspeitado (DNF quase inexistente/dificuldade baixa) e revelou uma lacuna de design nova (ultrapassagem sem recompensa por tentar) — nenhuma das duas foi corrigida ainda, ambas aguardam decisão de design do PO/CTO antes de mexer em números (ver Claude-Racing.md §2.24 pro porquê). 4 bugs/UX menores de UI já corrigidos e publicados nesta sessão (ícone do líder mal posicionado, ultrapassagem sem timeout, pit despercebido, boosts sem descrição).
+
+1. **Decisão do PO/CTO pendente:** (a) vale estreitar `ZONE_BASE_HALVES.purple` pra reintroduzir dificuldade real, testando no próximo playtest? (b) vale dar um bônus explícito de `GAIN`/chance de posição pra tentativas de ultrapassagem, pra a decisão ter upside e não só risco? Nenhuma das duas foi implementada — são mudanças de feel/design, não de bug fix.
+2. **T-110 — fechar as 2 sessões que faltam** (os 2 irmãos do PO) pra fechar o Gate 1 de fato.
 3. Após o Gate 1: iniciar o detalhamento das tarefas de M2 (E-201 a E-206, seção 8).
