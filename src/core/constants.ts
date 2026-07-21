@@ -27,6 +27,10 @@ export const GAIN: Record<Tier, number> = {
  * "como se o piloto nem freiasse, é caixa de brita na hora" — e ganhou também
  * uma chance de DNF instantâneo (ver MISS_INSTANT_DNF_CHANCE_*), não só dano.
  * `healthMax` do carro padrão foi recalibrado junto — ver DEFAULT_CAR_SETUP.
+ *
+ * Esta tabela não mudou na sessão 10 (calibração final da tensão healthMax ×
+ * DNF, ver Claude-Racing.md §2.27) — só `healthMax` e `MISS_INSTANT_DNF_CHANCE_*`
+ * foram recalibrados dessa vez.
  */
 export const DAMAGE: Record<Tier, number> = {
   purple: 3,
@@ -42,9 +46,21 @@ export const DAMAGE: Record<Tier, number> = {
  * §2.26): um miss é "caixa de brita na hora", não só perda de tempo. Cresce
  * conforme a saúde já está baixa (carro mais debilitado, mais fácil de perder
  * de vez o controle). Interpolação linear entre os 2 valores por `health/healthMax`.
+ *
+ * Recalibrado na sessão 10 (0.08/0.5 → 0.04/0.28, ver Claude-Racing.md §2.27):
+ * a sessão 9 tinha fixado `healthMax = 260` como meio-termo capenga entre os 2
+ * critérios do PO (verde à toa = metade da saúde vs. roxo à toa = quase
+ * impossível terminar), porque baixar `healthMax` pro valor que cumpre o
+ * critério do verde (219) deixava o DNF de Casual/Temerário em ~50% — só que
+ * esse piso de DNF vinha majoritariamente DESTA chance de crash instantâneo,
+ * não do acúmulo de dano (que é o que `healthMax` de fato controla). Reduzindo
+ * MIN/MAX (e não `healthMax`) o piso caiu para uma faixa razoável, permitindo
+ * `healthMax` voltar a 219 (honrando o critério do "verde" com exatidão) sem
+ * DNF explodir pros perfis que mais erram. Ver tabela de calibração em
+ * Claude-Racing.md §2.27.
  */
-export const MISS_INSTANT_DNF_CHANCE_MIN = 0.08; // saúde cheia
-export const MISS_INSTANT_DNF_CHANCE_MAX = 0.5; // saúde baixa
+export const MISS_INSTANT_DNF_CHANCE_MIN = 0.04; // saúde cheia
+export const MISS_INSTANT_DNF_CHANCE_MAX = 0.28; // saúde baixa
 
 /**
  * Penalidade de Gold aplicada num crash (DNF por "batida forte"). Pedido do PO
@@ -62,6 +78,11 @@ export const GOLD_CRASH_PENALTY = 50;
  * a zona de acerto nunca fica menor que este piso, mesmo com saúde zerada
  * (pra não virar literalmente impossível). Valor inicial não confirmado pelo
  * PO, a validar em playtest.
+ *
+ * **Ainda não confirmado pelo PO na sessão 10** (Claude-Racing.md §2.27) —
+ * deliberadamente não mexido nesta sessão: afeta dificuldade física de acerto
+ * humano, não sorteio de probabilidade, então o harness de bots não consegue
+ * validar se 0.6 está certo. Fica igual até o PO confirmar em playtest.
  */
 export const HEALTH_DIFFICULTY_FLOOR = 0.6;
 
@@ -79,7 +100,18 @@ export const PIT_SCALE = 1.3; // equipe de pit stop alarga a zona
 export const PNEU_BOOST_SCALE = 1.2;
 export const MAX_SCALE = 1.5;
 
-export const ZONE_BASE_HALVES = { purple: 8, green: 20, amber: 35 };
+/**
+ * Meias-larguras base (0-50) de cada zona de precisão. `purple` reduzido de
+ * 8 → 6 na sessão 10 (Claude-Racing.md §2.27, ~25% mais estreita) — resposta
+ * direta ao playtest do PO ("acertar o roxo não é um grande desafio", sessão
+ * 8, §2.21), reconfirmado pelo harness (DNF ~0% com a tabela DAMAGE antiga).
+ * **Isto NÃO é validado pelo harness de bots** — os bots simulam o resultado
+ * de cada tier por sorteio de probabilidade fixa por perfil, não a
+ * dificuldade física de acertar a zona (isso depende de reflexo humano real).
+ * Só um playtest humano pode confirmar se 6 é o valor certo, ou se ainda
+ * precisa cair mais / passou do ponto. Ver pergunta 1 pro PO em Claude-Racing.md §2.27.
+ */
+export const ZONE_BASE_HALVES = { purple: 6, green: 20, amber: 35 };
 
 /**
  * Segundos de vantagem acumulada equivalentes a 1 posição no grid.
@@ -113,9 +145,20 @@ export const POSITION_UNIT_SECONDS = 4.25;
 /**
  * valores padrão do carro do jogador até o Manager alimentar o RaceInput de
  * verdade (M2). `healthMax` recalibrado na sessão 9 junto com o novo `DAMAGE`
- * (180 → 220): meta do PO é "correr tudo no verde e chegar com ~metade da
+ * (180 → 260): meta do PO é "correr tudo no verde e chegar com ~metade da
  * saúde" ser razoável, e "correr tudo no roxo" ser praticamente inviável de
- * terminar. Valor inicial calculado a mão (ver Claude-Racing.md §2.26 pra
- * conta) e confirmado/ajustado via harness de bots na mesma sessão.
+ * terminar.
+ *
+ * Recalibrado de novo na sessão 10 (260 → 219, ver Claude-Racing.md §2.27):
+ * a sessão 9 tinha ficado num meio-termo porque baixar pro valor exato do
+ * critério "verde" (219) inflava demais o DNF de Casual/Temerário — mas a
+ * causa real desse DNF era `MISS_INSTANT_DNF_CHANCE_MIN/MAX`, não `healthMax`
+ * (ver comentário lá). Corrigindo a causa raiz, `healthMax` pôde voltar ao
+ * valor que honra o critério do PO com exatidão: uma corrida em Spa tem 73
+ * eventos de frenagem/pit (dano cheio) + 73 de saída (meio dano); com
+ * DAMAGE.green = 1, isso dá `73*1 + 73*0.5 = 109.5` de dano rodando tudo
+ * verde — `healthMax = 2 * 109.5 = 219` sobra exatamente metade. Confirmado
+ * com um script determinístico (sem depender de sorteio) e também com o
+ * harness de bots (ver tabela em Claude-Racing.md §2.27).
  */
-export const DEFAULT_CAR_SETUP: CarSetup = { zoneScale: 1, healthMax: 260, nitroCharges: 3 };
+export const DEFAULT_CAR_SETUP: CarSetup = { zoneScale: 1, healthMax: 219, nitroCharges: 3 };

@@ -124,12 +124,24 @@ describe('DNF instantâneo no miss + penalidade de gold (sessão 9, Claude-Racin
   });
 
   it('a chance de DNF instantâneo cresce conforme a saúde já está baixa', () => {
-    const rng = () => 0.3; // entre MISS_INSTANT_DNF_CHANCE_MIN (0.08) e MAX (0.5)
+    // rng calculado a partir das próprias constantes (não mais um valor mágico fixo,
+    // ex. 0.3) — um número hardcoded quebra silenciosamente toda vez que
+    // MISS_INSTANT_DNF_CHANCE_MIN/MAX é recalibrado (aconteceu nesta sessão: 0.08/0.5 ->
+    // 0.04/0.28 fez esse teste específico falhar). O ponto médio entre a chance da saúde
+    // cheia e a chance da saúde baixa continua válido pra qualquer valor futuro de MIN/MAX.
+    const chanceAtHealth = (healthBeforeDamage: number) => {
+      const healthAfterDamage = Math.max(0, healthBeforeDamage - DAMAGE.miss); // evento é frenagem = dano cheio
+      const fraction = healthAfterDamage / setup.healthMax;
+      return MISS_INSTANT_DNF_CHANCE_MIN + (MISS_INSTANT_DNF_CHANCE_MAX - MISS_INSTANT_DNF_CHANCE_MIN) * (1 - fraction);
+    };
+    const fullHealthChance = chanceAtHealth(setup.healthMax);
+    const lowHealthChance = chanceAtHealth(30);
+    const rng = () => (fullHealthChance + lowHealthChance) / 2;
 
     const sFull = createRace(track, setup); // saúde cheia
     advance(sFull);
     resolveCurrent(sFull, 'miss', { nitroUsed: false, rng });
-    expect(sFull.dnf).toBe(false); // saúde alta -> chance baixa -> rng 0.3 não "acerta"
+    expect(sFull.dnf).toBe(false); // saúde alta -> chance baixa -> rng não "acerta"
 
     const sLow = createRace(track, setup);
     sLow.health = 30; // bem danificado
