@@ -13,19 +13,27 @@ import {
 const SAVE_KEY = 'save-v1';
 
 /**
- * v2 (E-207, esta sessão): `inventory.equipped` passou a existir (escolha
- * manual de equipar via Oficina — ver `core/economy.ts`). v1 (sessão
- * anterior, E-203/E-204) não tinha esse campo — ver `migrateSave` para como
- * saves antigos são tratados sem perder progresso nem mudar de comportamento.
+ * v2 (E-207): `inventory.equipped` passou a existir (escolha manual de
+ * equipar via Oficina — ver `core/economy.ts`). v1 (sessão anterior,
+ * E-203/E-204) não tinha esse campo.
+ *
+ * v3 (sessão 12, TutorialScene — pedido do PO): `hasSeenTutorial` passou a
+ * existir. Saves migrados de v1/v2 (jogador que já tem progresso) entram como
+ * `true` — não faz sentido interromper quem já conhece o jogo com o tutorial
+ * na próxima vez que abrir. Só saves NOVOS (`defaultSave()`) começam `false`.
+ * Ver `migrateSave` para como saves antigos são tratados sem perder progresso
+ * nem mudar de comportamento.
  */
-const CURRENT_VERSION = 2;
+const CURRENT_VERSION = 3;
 
 export interface GameSave {
-  version: 2;
+  version: 3;
   gold: number;
   energy: number;
   energyLastUpdateMs: number;
   inventory: PartInventory;
+  /** true depois que o jogador viu (ou pulou) a TutorialScene ao menos 1 vez. */
+  hasSeenTutorial: boolean;
 }
 
 function defaultSave(): GameSave {
@@ -35,6 +43,7 @@ function defaultSave(): GameSave {
     energy: ENERGY_MAX,
     energyLastUpdateMs: Date.now(),
     inventory: emptyInventory(),
+    hasSeenTutorial: false,
   };
 }
 
@@ -53,21 +62,25 @@ function defaultSave(): GameSave {
 function migrateSave(raw: unknown): GameSave {
   if (!raw || typeof raw !== 'object') return defaultSave();
   const r = raw as {
-    version?: unknown; gold?: unknown; energy?: unknown; energyLastUpdateMs?: unknown;
+    version?: unknown; gold?: unknown; energy?: unknown; energyLastUpdateMs?: unknown; hasSeenTutorial?: unknown;
     inventory?: { counts?: PartInventory['counts']; equipped?: Partial<Record<PartSlot, Rarity | null>> };
   };
-  if ((r.version !== 1 && r.version !== CURRENT_VERSION) || !r.inventory?.counts) return defaultSave();
+  if ((r.version !== 1 && r.version !== 2 && r.version !== CURRENT_VERSION) || !r.inventory?.counts) return defaultSave();
 
   const equipped = { ...(r.inventory.equipped ?? {}) } as Record<PartSlot, Rarity | null>;
   for (const slot of PART_SLOTS) {
     if (!(slot in equipped)) equipped[slot] = null;
   }
+  // saves v1/v2 (sem hasSeenTutorial) são de jogador com progresso existente —
+  // tratado como "já viu" o tutorial, pra não interromper quem já conhece o jogo.
+  const hasSeenTutorial = typeof r.hasSeenTutorial === 'boolean' ? r.hasSeenTutorial : true;
   return {
     version: CURRENT_VERSION,
     gold: typeof r.gold === 'number' ? r.gold : 0,
     energy: typeof r.energy === 'number' ? r.energy : ENERGY_MAX,
     energyLastUpdateMs: typeof r.energyLastUpdateMs === 'number' ? r.energyLastUpdateMs : Date.now(),
     inventory: { counts: r.inventory.counts, equipped },
+    hasSeenTutorial,
   };
 }
 
@@ -128,6 +141,13 @@ export function applyRaceRewards(save: GameSave, reward: RaceRewardResult): Appl
  * (defensivo — a `OficinaScene` só deveria oferecer raridades possuídas, então
  * isso não deveria acontecer na prática pela UI normal).
  */
+/** Marca o tutorial como visto/pulado (TutorialScene, sessão 12) — persistido pra não aparecer de novo sozinho. */
+export function markTutorialSeen(save: GameSave): GameSave {
+  const updated: GameSave = { ...save, hasSeenTutorial: true };
+  saveGame(updated);
+  return updated;
+}
+
 export function equipPart(save: GameSave, slot: PartSlot, rarity: Rarity): GameSave {
   const inventory = cloneInventory(save.inventory);
   const applied = setEquipped(inventory, slot, rarity);

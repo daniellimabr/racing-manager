@@ -22,8 +22,8 @@ import { juice } from './juice.js';
 import { GOLD_CRASH_PENALTY } from '../core/constants.js';
 // E-202/E-203 (Manager, M2): recompensas pós-corrida (Gold + peças) — ponto de
 // integração mínimo pedido nesta sessão, ver Claude-Manager.md.
-import { computeRaceRewards, RARITY_LABELS, PART_SLOT_LABELS } from '../core/economy.js';
-import type { RaceRewardResult, FusionResult } from '../core/economy.js';
+import { computeRaceRewards, RARITY_LABELS, PART_SLOT_LABELS, equippedRarity, PART_SLOTS } from '../core/economy.js';
+import type { RaceRewardResult, FusionResult, PartSlot, Rarity } from '../core/economy.js';
 import { loadGame, applyRaceRewards } from '../persistence/gameSave.js';
 
 const track = spaTrack as unknown as TrackDef;
@@ -60,6 +60,11 @@ function formatGap(gap: number): string {
   return `${sign}${Math.abs(gap).toFixed(3).replace('.', ',')}s`;
 }
 
+/** Tempo de volta (pedido do PO, sessão 12) — segundos com 2 casas, vírgula decimal (pt-BR). */
+function formatLapTime(seconds: number): string {
+  return `${Math.max(0, seconds).toFixed(2).replace('.', ',')}s`;
+}
+
 function triangleWave(elapsedMs: number, periodMs: number): number {
   const t = (elapsedMs % periodMs) / periodMs;
   const phase = t < 0.5 ? t * 2 : 2 - t * 2;
@@ -91,6 +96,7 @@ export class RaceScene extends Phaser.Scene {
   private hudHealthLabelText!: Phaser.GameObjects.Text;
   private hudNitroGraphics!: Phaser.GameObjects.Graphics;
   private hudEventText!: Phaser.GameObjects.Text;
+  private hudLapTimeText!: Phaser.GameObjects.Text;
   private hudLastGap: number | null = null;
 
   // painel lateral esquerdo: gap ao líder de todos os 12 pilotos, em tempo real
@@ -113,6 +119,10 @@ export class RaceScene extends Phaser.Scene {
   private lastReward: RaceRewardResult | null = null;
   private lastFusions: FusionResult[] = [];
   private lastGoldTotal = 0;
+  // Sessão 12 (pendência do Claude-Manager.md §2.8/§5 item 3): avisa quando a
+  // fusão automática consome a raridade que o jogador tinha equipado de
+  // propósito, mudando o que está de fato equipado sem o jogador ter pedido.
+  private lastEquipChanges: { slot: PartSlot; from: Rarity; to: Rarity }[] = [];
 
   // T-105: modelo de input varia por tipo de desafio (ver Claude-Racing.md §2.10/§2.13)
   private challengeMode: 'sweep' | 'ramp' | 'hold' = 'sweep';
@@ -347,6 +357,9 @@ export class RaceScene extends Phaser.Scene {
       fontSize: '10px', color: '#8899aa',
     }).setOrigin(1, 0);
 
+    // Tempo de volta (pedido do PO, sessão 12) — última volta completada + melhor volta até agora.
+    this.hudLapTimeText = this.add.text(16, 64, '', { fontSize: '10px', color: '#8899aa' });
+
     this.buildLeaderboardPanel();
   }
 
@@ -403,6 +416,14 @@ export class RaceScene extends Phaser.Scene {
     this.drawHudNitro(s.nitro, this.carSetup.nitroCharges);
 
     this.hudEventText.setText(eventLabel);
+
+    if (s.lapTimes.length > 0) {
+      const last = s.lapTimes[s.lapTimes.length - 1];
+      const best = Math.min(...s.lapTimes);
+      this.hudLapTimeText.setText(`Última: ${formatLapTime(last)}  Melhor: ${formatLapTime(best)}`);
+    } else {
+      this.hudLapTimeText.setText('');
+    }
 
     this.updateLeaderboardPanel(standings);
   }
@@ -962,6 +983,17 @@ export class RaceScene extends Phaser.Scene {
       output.goldPenalty > 0 ? `Penalidade total: -${output.goldPenalty} Gold` : '',
     ].filter(Boolean);
 
+    // Tempo de volta (pedido do PO, sessão 12): lista cada volta completada, com a melhor destacada.
+    if (output.lapTimes.length > 0) {
+      const bestLapTime = Math.min(...output.lapTimes);
+      lines.push('');
+      lines.push('Voltas:');
+      output.lapTimes.forEach((t, i) => {
+        const marker = t === bestLapTime ? ' ★ melhor' : '';
+        lines.push(`  Volta ${i + 1}: ${formatLapTime(t)}${marker}`);
+      });
+    }
+
     // E-202 (Manager, M2): Gold + peças ganhas nesta corrida, aplicadas ao save
     // persistido uma única vez (mesmo guard `raceEnded` já usado pra telemetria
     // não disparar 2x se showSummary for chamado de novo).
@@ -975,6 +1007,7 @@ export class RaceScene extends Phaser.Scene {
         dnf: output.dnf,
         reviveUsed: output.reviveUsed,
         manualAbandon,
+        lapTimes: output.lapTimes,
       });
 
       // `playerStanding.position` e `output.position` são agora garantidamente
@@ -986,10 +1019,20 @@ export class RaceScene extends Phaser.Scene {
         position: playerStanding.position, dnf: output.dnf, goldPenalty: output.goldPenalty,
       });
       const save = loadGame();
+      // Pendência do Claude-Manager.md §2.8/§5 item 3: a fusão automática pode
+      // consumir a raridade que o jogador tinha equipado de propósito, trocando
+      // o que está de fato equipado sem ele ter pedido — captura o "antes" pra
+      // comparar depois de aplicar a recompensa/fusão e avisar na tela.
+      const equippedBefore = Object.fromEntries(
+        PART_SLOTS.map((slot) => [slot, equippedRarity(save.inventory, slot)])
+      );
       const { save: updatedSave, fusions } = applyRaceRewards(save, reward);
       this.lastReward = reward;
       this.lastFusions = fusions;
       this.lastGoldTotal = updatedSave.gold;
+      this.lastEquipChanges = PART_SLOTS
+        .map((slot) => ({ slot, from: equippedBefore[slot], to: equippedRarity(updatedSave.inventory, slot) }))
+        .filter((c): c is { slot: PartSlot; from: Rarity; to: Rarity } => c.from !== null && c.from !== c.to && c.to !== null);
     }
 
     if (this.lastReward) {
@@ -1000,6 +1043,12 @@ export class RaceScene extends Phaser.Scene {
       }
       for (const fusion of this.lastFusions) {
         lines.push(`Fusão! ${PART_SLOT_LABELS[fusion.slot]}: ${RARITY_LABELS[fusion.from]} → ${RARITY_LABELS[fusion.to]}`);
+      }
+      // Pendência do Claude-Manager.md §2.8/§5 item 3: avisa quando a fusão
+      // automática mudou o que está de fato equipado (o jogador tinha
+      // escolhido uma raridade específica, e ela foi toda consumida).
+      for (const change of this.lastEquipChanges) {
+        lines.push(`⚠ Peça equipada em ${PART_SLOT_LABELS[change.slot]} mudou: ${RARITY_LABELS[change.from]} → ${RARITY_LABELS[change.to]} (fusão)`);
       }
     }
 

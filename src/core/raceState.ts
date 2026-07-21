@@ -9,6 +9,7 @@ import {
   GAIN, DAMAGE, NITRO_GOOD_BONUS, NITRO_BAD_RELIEF,
   REPAIR_BOOST_AMOUNT, ERROR_RECOVERY_RELIEF, PLAYER_GRID_PACE_SCALE,
   MISS_INSTANT_DNF_CHANCE_MIN, MISS_INSTANT_DNF_CHANCE_MAX, GOLD_CRASH_PENALTY,
+  NOMINAL_LAP_SECONDS,
 } from './constants.js';
 
 /**
@@ -63,6 +64,8 @@ export function createRace(
     finished: false,
     dnf: false,
     goldPenalty: 0,
+    lapTimes: [],
+    currentLapGain: 0,
     log: [],
   };
   // posição/gap iniciais já refletem o startProgress (se houver), sem esperar
@@ -144,6 +147,9 @@ export function resolveCurrent(state: RaceState, tier: Tier, opts: ResolveOption
   if (isSaida) gain *= 0.5;
 
   state.raceProgress += gain;
+  // Tempo de volta (pedido do PO, sessão 12): soma o ganho/perda desde o
+  // início da volta atual — fechado em `advance()` quando a volta muda.
+  state.currentLapGain += gain;
 
   let positionChanged: 'gained' | 'lost' | null = null;
   if (!isSaida) {
@@ -197,11 +203,21 @@ export function advance(state: RaceState, rng: () => number = Math.random): void
   // ACABOU de ser resolvido era uma saída, pra aplicar a mesma regra de
   // "metade do ganho" nas IAs (ver comentário de `advanceGrid` em grid.ts).
   const wasSaida = currentEvent(state).kind === 'saida';
+  const finishedLap = currentEvent(state).lap;
   state.eventIndex += 1;
   if (state.eventIndex >= state.events.length) {
     state.finished = true;
   } else {
     state.lap = state.events[state.eventIndex].lap;
+  }
+  // Tempo de volta: a volta que acabou de ser percorrida fecha quando o
+  // próximo evento pertence a outra volta (ou a corrida terminou). O evento
+  // de pit tem `lap` igual à volta que ele encerra (ver track.ts), então o
+  // tempo gasto no pit entra na volta em que ele aconteceu — coerente com
+  // "volta do pit" ficando mais lenta em transmissões de corrida de verdade.
+  if (state.finished || state.lap !== finishedLap) {
+    state.lapTimes.push(NOMINAL_LAP_SECONDS - state.currentLapGain);
+    state.currentLapGain = 0;
   }
   advanceGrid(state.grid, rng, wasSaida);
 }
@@ -225,5 +241,6 @@ export function toRaceOutput(state: RaceState): RaceOutput {
     lapsCompleted: state.finished ? state.track.laps : Math.max(0, state.lap - 1),
     events: state.log,
     goldPenalty: state.goldPenalty,
+    lapTimes: state.lapTimes,
   };
 }

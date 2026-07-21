@@ -35,6 +35,14 @@ export class HubScene extends Phaser.Scene {
   create(): void {
     this.save = loadGame();
 
+    // TutorialScene (sessão 12, pedido do PO): save novo (1ª vez) redireciona
+    // pro tutorial antes de mostrar o Hub. Saves migrados de v1/v2 entram como
+    // "já viu" (ver gameSave.ts) — não interrompe quem já joga.
+    if (!this.save.hasSeenTutorial) {
+      this.scene.start('TutorialScene');
+      return;
+    }
+
     this.add.rectangle(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT, 0x14161a).setOrigin(0, 0);
     this.add.text(CANVAS_WIDTH / 2, 28, 'RACING MANAGER', {
       fontSize: '22px', color: '#ffffff', fontStyle: 'bold',
@@ -42,6 +50,7 @@ export class HubScene extends Phaser.Scene {
     this.add.text(CANVAS_WIDTH / 2, 54, 'Garagem / QG', { fontSize: '13px', color: '#8899aa' }).setOrigin(0.5);
 
     this.buildCars();
+    this.buildTutorialButton();
     this.buildOficinaButton();
     this.buildEnergyPanel();
     this.buildGoldPanel();
@@ -78,6 +87,19 @@ export class HubScene extends Phaser.Scene {
 
     drawCarCard(16, 'Carro 1', 'Você (piloto titular)', 0xffdd33);
     drawCarCard(16 + cardW + 16, 'Carro 2', 'IA (companheiro — em breve)', 0x33ddff);
+  }
+
+  /** Reabre a TutorialScene a qualquer momento (sessão 12) — mesmo depois de já ter sido vista/pulada. */
+  private buildTutorialButton(): void {
+    const bg = this.add.rectangle(16, 14, 100, 28, 0x2a2e34)
+      .setOrigin(0, 0).setStrokeStyle(1, 0x444a52).setInteractive({ useHandCursor: true });
+    this.add.text(66, 28, 'COMO JOGAR', {
+      fontSize: '10px', color: '#ffffff', fontStyle: 'bold',
+    }).setOrigin(0.5);
+    bg.on('pointerdown', () => {
+      juice.click();
+      this.scene.start('TutorialScene');
+    });
   }
 
   /** Leva à Oficina (E-207, CLAUDE.md §5 tela 2) — equipar peça manualmente por slot. */

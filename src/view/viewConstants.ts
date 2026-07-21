@@ -1,5 +1,6 @@
 import type { BoostId, Tier } from '../core/types.js';
 export { DEFAULT_CAR_SETUP } from '../core/constants.js';
+import { NOMINAL_LAP_SECONDS } from '../core/constants.js';
 
 /** Constantes de "feel" da view (não fazem parte do core — são puramente de apresentação/input). */
 
@@ -72,8 +73,11 @@ export const CHALLENGE_PREP_MS = 600;
  * Conversão de segundos de gap em fração do traçado, para posicionar os
  * carros do grid num "pelotão" visualmente coerente (modelo 1D, sem física —
  * ver risco "escopo do grid" em Claude-Tech.md §9). ~5 min / 8 voltas.
+ * Reaproveita `NOMINAL_LAP_SECONDS` (core/constants.ts) — mesmo número, agora
+ * também é a base do cálculo de tempo de volta real (sessão 12), pra não ter
+ * 2 "volta nominal" desencontradas entre core e view.
  */
-export const SECONDS_PER_LAP_VISUAL = 37.5;
+export const SECONDS_PER_LAP_VISUAL = NOMINAL_LAP_SECONDS;
 export const MAX_VISUAL_GAP_SECONDS = SECONDS_PER_LAP_VISUAL * 0.9;
 
 export const TIER_COLORS: Record<Tier, number> = {

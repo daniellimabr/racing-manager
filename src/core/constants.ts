@@ -1,5 +1,16 @@
 import type { Tier, CarSetup } from './types.js';
 
+/**
+ * Tempo (segundos) de uma volta "nominal" (ritmo médio, sem ganho/perda) —
+ * base pra calcular tempo de volta exibível (pedido do PO: "traria nível de
+ * realismo à simulação"). Mesmo valor já usado pela view pra posicionar o
+ * pelotão visualmente (`SECONDS_PER_LAP_VISUAL`, `viewConstants.ts`, que agora
+ * importa daqui em vez de duplicar o número) — ~5min/8 voltas (Claude-Tech.md
+ * §5). Tempo de volta de verdade = este valor MENOS o ganho acumulado na
+ * volta (`RaceState.currentLapGain`) — ver `advance()`.
+ */
+export const NOMINAL_LAP_SECONDS = 37.5;
+
 /** Ganho de tempo (segundos) por tier — positivo = ganha tempo, negativo = perde */
 export const GAIN: Record<Tier, number> = {
   purple: 0.30,

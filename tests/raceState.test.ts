@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { createRace, currentEvent, resolveCurrent, advance, revive, tryUseNitro, toRaceOutput, applyBoost } from '../src/core/raceState.js';
 import {
-  REPAIR_BOOST_AMOUNT, DAMAGE, GOLD_CRASH_PENALTY, PLAYER_GRID_PACE_SCALE,
-  MISS_INSTANT_DNF_CHANCE_MIN, MISS_INSTANT_DNF_CHANCE_MAX,
+  REPAIR_BOOST_AMOUNT, DAMAGE, GAIN, GOLD_CRASH_PENALTY, PLAYER_GRID_PACE_SCALE,
+  MISS_INSTANT_DNF_CHANCE_MIN, MISS_INSTANT_DNF_CHANCE_MAX, NOMINAL_LAP_SECONDS,
 } from '../src/core/constants.js';
 import type { TrackDef, CarSetup, RaceState } from '../src/core/types.js';
 
@@ -190,6 +190,44 @@ describe('saída aplica metade do dano, sem arredondar (regressão da sessão 9,
     const r = resolveCurrent(s, 'green', { nitroUsed: false });
     expect(r.damage).toBeCloseTo(DAMAGE.green / 2, 5);
     expect(s.health).toBeCloseTo(before - DAMAGE.green / 2, 5);
+  });
+});
+
+describe('tempo de volta (sessão 12, pedido do PO)', () => {
+  it('fecha a 1ª volta ao entrar na 2ª, com o tempo = nominal menos o ganho acumulado (inclui o pit, que conta pra volta em que aconteceu)', () => {
+    const s = createRace(track, setup);
+    // pista de teste: largada(saida,lap1) -> frenagem/saida c1(lap1) -> frenagem/saida c2(lap1,boost) -> pit(lap1) -> ...lap2
+    let guard = 0;
+    while (s.lap === 1 && !s.finished && guard < 20) {
+      resolveCurrent(s, 'green', { nitroUsed: false });
+      advance(s);
+      guard++;
+    }
+    expect(s.lapTimes.length).toBe(1);
+    // largada(saida,0.5x) + frenagem c1 + saida c1(0.5x) + frenagem c2 + saida c2(0.5x) + pit(cheio) = 3x cheio + 3x meio
+    const expectedGain = GAIN.green * 3 + GAIN.green * 0.5 * 3;
+    expect(s.lapTimes[0]).toBeCloseTo(NOMINAL_LAP_SECONDS - expectedGain, 5);
+    expect(s.currentLapGain).toBe(0); // zera pra próxima volta
+  });
+
+  it('fecha a última volta também quando a corrida termina, e RaceOutput.lapTimes bate com o nº de voltas', () => {
+    const s = createRace(track, setup);
+    let guard = 0;
+    while (!s.finished && guard < 1000) {
+      resolveCurrent(s, 'green', { nitroUsed: false });
+      advance(s);
+      guard++;
+    }
+    expect(s.lapTimes.length).toBe(track.laps);
+    const output = toRaceOutput(s);
+    expect(output.lapTimes).toEqual(s.lapTimes);
+  });
+
+  it('não fecha volta nenhuma antes da 1ª transição de volta (currentLapGain só acumula)', () => {
+    const s = createRace(track, setup);
+    resolveCurrent(s, 'purple', { nitroUsed: false }); // ainda a largada, sem advance()
+    expect(s.lapTimes.length).toBe(0);
+    expect(s.currentLapGain).toBeCloseTo(GAIN.purple * 0.5, 5);
   });
 });
 

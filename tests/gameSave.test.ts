@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { loadGame, saveGame, spendEnergyForRace, applyRaceRewards, equipPart } from '../src/persistence/gameSave.js';
+import { loadGame, saveGame, spendEnergyForRace, applyRaceRewards, equipPart, markTutorialSeen } from '../src/persistence/gameSave.js';
 import { clear, saveJSON } from '../src/persistence/storage.js';
 import { ENERGY_MAX, ENERGY_COST_PER_RACE, ENERGY_REGEN_MINUTES_PER_POINT, equippedRarity } from '../src/core/economy.js';
 
@@ -85,19 +85,66 @@ describe('gameSave (E-205)', () => {
       saveJSON('save-v1', v1Raw);
 
       const loaded = loadGame(500_000); // mesmo instante do save — sem regen no meio
-      expect(loaded.version).toBe(2);
+      expect(loaded.version).toBe(3);
       expect(loaded.gold).toBe(250);
       expect(loaded.energy).toBe(12);
       // sem escolha própria migrada (equipped ausente) → cai no mesmo fallback automático de sempre
       expect(equippedRarity(loaded.inventory, 'motor')).toBe('blue');
+      // save v1 = jogador com progresso existente → tratado como "já viu" o tutorial (sessão 12)
+      expect(loaded.hasSeenTutorial).toBe(true);
     });
 
     it('save corrompido/desconhecido não quebra o load — reseta para um save novo', () => {
       saveJSON('save-v1', { lixo: true });
       const loaded = loadGame(0);
-      expect(loaded.version).toBe(2);
+      expect(loaded.version).toBe(3);
       expect(loaded.gold).toBe(0);
       expect(loaded.energy).toBe(ENERGY_MAX);
+    });
+  });
+
+  describe('hasSeenTutorial (sessão 12, TutorialScene)', () => {
+    it('save novo começa sem ter visto o tutorial', () => {
+      const save = loadGame(0);
+      expect(save.hasSeenTutorial).toBe(false);
+    });
+
+    it('save v2 (sem hasSeenTutorial) migra como "já viu" — jogador com progresso não deveria ser interrompido', () => {
+      const v2Raw = {
+        version: 2,
+        gold: 10,
+        energy: 30,
+        energyLastUpdateMs: 0,
+        inventory: {
+          counts: {
+            motor: { gray: 0, green: 0, blue: 0, purple: 0, gold: 0, red: 0 },
+            asaDianteira: { gray: 0, green: 0, blue: 0, purple: 0, gold: 0, red: 0 },
+            asaTraseira: { gray: 0, green: 0, blue: 0, purple: 0, gold: 0, red: 0 },
+            chassis: { gray: 0, green: 0, blue: 0, purple: 0, gold: 0, red: 0 },
+            suspensao: { gray: 0, green: 0, blue: 0, purple: 0, gold: 0, red: 0 },
+            pneu: { gray: 0, green: 0, blue: 0, purple: 0, gold: 0, red: 0 },
+            livery: { gray: 0, green: 0, blue: 0, purple: 0, gold: 0, red: 0 },
+          },
+          equipped: {
+            motor: null, asaDianteira: null, asaTraseira: null, chassis: null,
+            suspensao: null, pneu: null, livery: null,
+          },
+        },
+      };
+      saveJSON('save-v1', v2Raw);
+      const loaded = loadGame(0);
+      expect(loaded.version).toBe(3);
+      expect(loaded.hasSeenTutorial).toBe(true);
+    });
+
+    it('markTutorialSeen persiste entre loads', () => {
+      let save = loadGame(0);
+      expect(save.hasSeenTutorial).toBe(false);
+      save = markTutorialSeen(save);
+      expect(save.hasSeenTutorial).toBe(true);
+
+      const reloaded = loadGame(0);
+      expect(reloaded.hasSeenTutorial).toBe(true);
     });
   });
 

@@ -105,6 +105,10 @@ export interface RaceState {
   dnfReason?: string;
   /** Gold "perdido" acumulado em crashes (batida forte) — preview da conexão com o Manager (M2), ver GOLD_CRASH_PENALTY. */
   goldPenalty: number;
+  /** Tempos (segundos) das voltas já completadas, na ordem — ver `advance()` e NOMINAL_LAP_SECONDS. */
+  lapTimes: number[];
+  /** Ganho/perda acumulado (soma de `gain`) desde o início da volta atual — zera a cada volta fechada. */
+  currentLapGain: number;
   log: string[];
 }
 
@@ -132,4 +136,6 @@ export interface RaceOutput {
   events: string[];
   /** Gold "perdido" acumulado em crashes nesta corrida — ver `RaceState.goldPenalty`. */
   goldPenalty: number;
+  /** Tempos (segundos) das voltas completadas, na ordem — ver `RaceState.lapTimes`. */
+  lapTimes: number[];
 }
