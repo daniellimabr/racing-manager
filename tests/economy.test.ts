@@ -3,7 +3,7 @@ import {
   ENERGY_MAX, ENERGY_COST_PER_RACE, ENERGY_REGEN_MINUTES_PER_POINT,
   applyEnergyRegen, msUntilNextEnergyPoint, canAffordRace,
   goldForPosition, computeRaceRewards, rollPartDropsForRace,
-  emptyInventory, receivePart, fuseAll, computeZoneScale, equippedRarity,
+  emptyInventory, receivePart, fuseAll, computeZoneScale, equippedRarity, setEquipped,
   RARITIES, PART_SLOTS,
 } from '../src/core/economy.js';
 
@@ -153,5 +153,56 @@ describe('inventário, drops e fusão 3→1 (E-203)', () => {
 
   it('todas as raridades estão em ordem crescente conhecida', () => {
     expect(RARITIES).toEqual(['gray', 'green', 'blue', 'purple', 'gold', 'red']);
+  });
+});
+
+describe('equipar manualmente (E-207, Oficina — PO rejeitou auto-equip como solução permanente)', () => {
+  it('setEquipped só aceita raridade que o jogador possui em quantidade > 0', () => {
+    const inv = emptyInventory();
+    receivePart(inv, 'pneu', 'gray');
+    expect(setEquipped(inv, 'pneu', 'blue')).toBe(false); // não possui blue
+    expect(equippedRarity(inv, 'pneu')).toBe('gray'); // continua no fallback automático (só tem gray)
+  });
+
+  it('equipar manualmente uma raridade não-ótima é respeitado, não força a melhor', () => {
+    const inv = emptyInventory();
+    receivePart(inv, 'chassis', 'gray');
+    receivePart(inv, 'chassis', 'purple'); // jogador também possui uma peça melhor
+    expect(setEquipped(inv, 'chassis', 'gray')).toBe(true);
+    expect(equippedRarity(inv, 'chassis')).toBe('gray'); // escolha do jogador prevalece sobre a melhor possuída
+  });
+
+  it('sem escolha própria (equipped null), continua caindo no fallback automático (comportamento antigo preservado)', () => {
+    const inv = emptyInventory();
+    receivePart(inv, 'motor', 'gray');
+    receivePart(inv, 'motor', 'blue');
+    expect(equippedRarity(inv, 'motor')).toBe('blue'); // nunca chamou setEquipped
+  });
+
+  it('fallback automático quando a raridade escolhida pelo jogador some do inventário (ex.: toda fundida)', () => {
+    const inv = emptyInventory();
+    receivePart(inv, 'motor', 'gray');
+    receivePart(inv, 'motor', 'gray');
+    receivePart(inv, 'motor', 'gray');
+    receivePart(inv, 'motor', 'blue');
+    expect(setEquipped(inv, 'motor', 'gray')).toBe(true); // escolhe gray de propósito, mesmo tendo blue
+    expect(equippedRarity(inv, 'motor')).toBe('gray');
+
+    fuseAll(inv); // funde os 3 gray em 1 green — a raridade escolhida (gray) some do inventário
+    expect(inv.counts.motor.gray).toBe(0);
+    // fallback automático pra melhor restante (blue > green), não força a raridade recém-criada (green)
+    expect(equippedRarity(inv, 'motor')).toBe('blue');
+  });
+
+  it('computeZoneScale reflete a escolha manual, não sempre a melhor possuída', () => {
+    const invAuto = emptyInventory();
+    receivePart(invAuto, 'pneu', 'gold');
+
+    const invManual = emptyInventory();
+    receivePart(invManual, 'pneu', 'gray');
+    receivePart(invManual, 'pneu', 'gold');
+    setEquipped(invManual, 'pneu', 'gray'); // escolhe a pior de propósito
+
+    expect(computeZoneScale(invManual)).toBeLessThan(computeZoneScale(invAuto));
   });
 });

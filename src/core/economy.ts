@@ -247,27 +247,52 @@ export function rollPartDropsForRace(position: number, rng: () => number = Math.
 
 /**
  * Inventário do jogador: contagem simples de quantas peças de cada
- * slot+raridade o jogador possui. Não há "peças individuais" com identidade
- * própria (mesmo modelo do Archero). **Decisão de simplificação desta sessão**
- * (ver Claude-Manager.md): não existe uma tela de Oficina ainda (fora do
- * escopo — só o Hub, E-204, foi pedido), então não há equipar/desequipar
- * manual. "Equipada" é sempre derivada como a MELHOR raridade que o jogador
- * possui em cada slot (`equippedRarity`) — equivale a "o jogo sempre usa a
- * sua melhor peça automaticamente". Isso também simplifica a fusão: os 3
- * exemplares consumidos podem ser quaisquer 3 (não precisa reservar a "peça
- * em uso" como especial), o que evita um caso de borda confuso onde fundir
- * uma peça melhor "desequiparia" a antiga de volta para a pilha de sobras.
+ * slot+raridade o jogador possui, mais a escolha de equipar por slot
+ * (`equipped`). Não há "peças individuais" com identidade própria (mesmo
+ * modelo do Archero) — só contagem por slot+raridade.
+ *
+ * **Histórico (E-203, sessão anterior):** a 1ª versão desta sprint não tinha
+ * `equipped` — a peça "equipada" era sempre DERIVADA automaticamente como a
+ * melhor raridade possuída (auto-equip), porque não havia tela de Oficina
+ * ainda. **O PO rejeitou isso como solução permanente** ("equipar deve ser
+ * escolha do jogador" — Claude-Manager.md §3 pergunta 5) — `equipped` (E-207,
+ * esta sessão) é a escolha explícita e persistida do jogador por slot.
+ *
+ * `equipped[slot]` é só uma **referência de raridade** (não uma "peça
+ * reservada" separada da pilha) — continua sendo possível fundir livremente
+ * qualquer trinca da mesma raridade (a fusão não precisa saber qual raridade
+ * está "em uso"). Isso evita o caso de borda que motivou o auto-equip
+ * original: se a raridade escolhida pelo jogador deixar de existir no
+ * inventário (ex.: foi toda consumida numa fusão), `equippedRarity()` cai
+ * automaticamente para a melhor raridade restante — é um FALLBACK pontual
+ * para esse caso específico, não uma volta ao "sempre automático" de antes.
+ * `equipped[slot] === null` (ou ausente — ver migração em `gameSave.ts`)
+ * significa "sem escolha própria ainda", que também usa esse mesmo fallback
+ * — por isso saves antigos (sem `equipped`) continuam se comportando
+ * exatamente como antes até o jogador equipar manualmente pela 1ª vez.
  */
 export interface PartInventory {
   counts: Record<PartSlot, Record<Rarity, number>>;
+  /** Escolha explícita do jogador por slot (Oficina, E-207); `null` = sem escolha própria ainda (usa o fallback automático). */
+  equipped: Record<PartSlot, Rarity | null>;
 }
 
 export function emptyInventory(): PartInventory {
   const counts = {} as Record<PartSlot, Record<Rarity, number>>;
+  const equipped = {} as Record<PartSlot, Rarity | null>;
   for (const slot of PART_SLOTS) {
     counts[slot] = { gray: 0, green: 0, blue: 0, purple: 0, gold: 0, red: 0 };
+    equipped[slot] = null;
   }
-  return { counts };
+  return { counts, equipped };
+}
+
+/** Clona um inventário (contagens + escolhas de equipar) — usado antes de mutar, pra não alterar in-place o objeto do save anterior antes de decidir persistir. */
+export function cloneInventory(inv: PartInventory): PartInventory {
+  const counts = Object.fromEntries(
+    Object.entries(inv.counts).map(([slot, c]) => [slot, { ...c }])
+  ) as PartInventory['counts'];
+  return { counts, equipped: { ...inv.equipped } };
 }
 
 /** Recebe 1 peça (de drop ou de fusão) num slot — só soma à contagem daquela raridade. */
@@ -275,12 +300,36 @@ export function receivePart(inv: PartInventory, slot: PartSlot, rarity: Rarity):
   inv.counts[slot][rarity] += 1;
 }
 
-/** A melhor raridade que o jogador possui neste slot (ou `null` se não tem nenhuma) — "equipada" automática. */
-export function equippedRarity(inv: PartInventory, slot: PartSlot): Rarity | null {
+/** A melhor raridade que o jogador possui neste slot (ou `null` se não tem nenhuma). Fallback automático usado por `equippedRarity`. */
+function bestOwnedRarity(inv: PartInventory, slot: PartSlot): Rarity | null {
   for (let i = RARITIES.length - 1; i >= 0; i--) {
     if (inv.counts[slot][RARITIES[i]] > 0) return RARITIES[i];
   }
   return null;
+}
+
+/**
+ * A raridade efetivamente equipada num slot: a escolha explícita do jogador
+ * (`inv.equipped[slot]`), SE ele ainda possuir ao menos 1 unidade dela;
+ * senão (sem escolha própria, ou a escolha sumiu do inventário — ex.: foi
+ * toda fundida), cai para a melhor raridade restante que ele possui.
+ */
+export function equippedRarity(inv: PartInventory, slot: PartSlot): Rarity | null {
+  const chosen = inv.equipped[slot];
+  if (chosen && inv.counts[slot][chosen] > 0) return chosen;
+  return bestOwnedRarity(inv, slot);
+}
+
+/**
+ * Equipa manualmente uma raridade num slot (Oficina, E-207) — só aceita
+ * raridades que o jogador realmente possui em quantidade > 0 (escolher uma
+ * raridade não possuída não faz sentido e é ignorado). Retorna `true` se a
+ * escolha foi aplicada, `false` se foi ignorada (raridade não possuída).
+ */
+export function setEquipped(inv: PartInventory, slot: PartSlot, rarity: Rarity): boolean {
+  if (inv.counts[slot][rarity] <= 0) return false;
+  inv.equipped[slot] = rarity;
+  return true;
 }
 
 export interface FusionResult {
@@ -312,7 +361,7 @@ export function fuseAll(inv: PartInventory): FusionResult[] {
   return results;
 }
 
-/** `zoneScale` real (E-203) a partir do que está "equipado" (melhor peça possuída por slot) — soma os bônus de raridade dos 7 slots. */
+/** `zoneScale` real (E-203) a partir do que está efetivamente equipado em cada slot (`equippedRarity` — escolha do jogador, com fallback automático) — soma os bônus de raridade dos 7 slots. */
 export function computeZoneScale(inv: PartInventory): number {
   let bonus = 0;
   for (const slot of PART_SLOTS) {

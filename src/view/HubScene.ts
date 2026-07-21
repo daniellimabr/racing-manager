@@ -42,6 +42,7 @@ export class HubScene extends Phaser.Scene {
     this.add.text(CANVAS_WIDTH / 2, 54, 'Garagem / QG', { fontSize: '13px', color: '#8899aa' }).setOrigin(0.5);
 
     this.buildCars();
+    this.buildOficinaButton();
     this.buildEnergyPanel();
     this.buildGoldPanel();
     this.buildPartsSummary();
@@ -79,6 +80,19 @@ export class HubScene extends Phaser.Scene {
     drawCarCard(16 + cardW + 16, 'Carro 2', 'IA (companheiro — em breve)', 0x33ddff);
   }
 
+  /** Leva à Oficina (E-207, CLAUDE.md §5 tela 2) — equipar peça manualmente por slot. */
+  private buildOficinaButton(): void {
+    const bg = this.add.rectangle(CANVAS_WIDTH - 100, 14, 84, 28, 0x2a2e34)
+      .setOrigin(0, 0).setStrokeStyle(1, 0x444a52).setInteractive({ useHandCursor: true });
+    this.add.text(CANVAS_WIDTH - 58, 28, 'OFICINA', {
+      fontSize: '11px', color: '#ffffff', fontStyle: 'bold',
+    }).setOrigin(0.5);
+    bg.on('pointerdown', () => {
+      juice.click();
+      this.scene.start('OficinaScene');
+    });
+  }
+
   private buildEnergyPanel(): void {
     const y = 280;
     this.add.text(16, y, 'ENERGIA', { fontSize: '11px', color: '#8899aa' });
@@ -94,13 +108,14 @@ export class HubScene extends Phaser.Scene {
   }
 
   /**
-   * Resumo textual das peças (não há tela de Oficina ainda — E-203 só pediu
-   * o modelo real de zoneScale a partir do inventário, não a UI de equipar;
-   * ver Claude-Manager.md). "Equipada" é sempre a melhor raridade possuída em
-   * cada slot (auto-equip — decisão registrada em core/economy.ts).
+   * Resumo textual das peças efetivamente equipadas (escolha do jogador via
+   * Oficina, E-207 — ver `OficinaScene`; fallback automático pra melhor
+   * raridade possuída se não houver escolha própria ou ela tiver sumido do
+   * inventário, ver `equippedRarity` em core/economy.ts). Não é a tela de
+   * Oficina em si, só uma prévia legível do que `computeZoneScale` calcula.
    */
   private buildPartsSummary(): void {
-    this.add.text(16, 372, 'PEÇAS (melhor por slot — auto-equipadas)', { fontSize: '11px', color: '#8899aa' });
+    this.add.text(16, 372, 'PEÇAS (equipadas — toque OFICINA pra trocar)', { fontSize: '11px', color: '#8899aa' });
     this.partsSummaryText = this.add.text(16, 388, '', {
       fontSize: '11px', color: '#cccccc', lineSpacing: 4, fontFamily: 'monospace',
     });

@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import pkg from '../../package.json';
 import { RaceScene } from './RaceScene.js';
 import { HubScene } from './HubScene.js';
+import { OficinaScene } from './OficinaScene.js';
 import { CANVAS_WIDTH, CANVAS_HEIGHT } from './viewConstants.js';
 import { initPostHogFromEnv, track } from '../telemetry/analytics.js';
 
@@ -30,5 +31,6 @@ new Phaser.Game({
   },
   // Hub (E-204) vira a tela inicial (CLAUDE.md §5) — antes o jogo ia direto
   // pra corrida; RaceScene continua registrada, só deixa de ser a 1ª cena.
-  scene: [HubScene, RaceScene],
+  // OficinaScene (E-207) é acessível a partir do Hub (botão "OFICINA").
+  scene: [HubScene, RaceScene, OficinaScene],
 });
