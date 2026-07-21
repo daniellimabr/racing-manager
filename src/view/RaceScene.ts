@@ -28,7 +28,11 @@ function pathIndexForEvent(ev: RaceEvent): number {
   if (ev.kind === 'pit') return track.pitPathIndex;
   if (ev.cornerId) {
     const corner = track.corners.find((c) => c.id === ev.cornerId);
-    if (corner) return corner.pathIndex;
+    // frenagem = ponto de entrada da curva; saída = meio caminho até o próximo
+    // ponto do traçado (representa a saída/ápice) — sem isso as duas fases da
+    // mesma curva caem no mesmo pathIndex e o tween entre elas não move nada
+    // (feedback do PO: carros "não se moviam" entre frenagem e aceleração).
+    if (corner) return ev.kind === 'saida' ? corner.pathIndex + 0.5 : corner.pathIndex;
   }
   return 0; // largada
 }
@@ -72,6 +76,10 @@ export class RaceScene extends Phaser.Scene {
   private hudNitroGraphics!: Phaser.GameObjects.Graphics;
   private hudEventText!: Phaser.GameObjects.Text;
   private hudLastGap: number | null = null;
+
+  // painel lateral esquerdo: gap ao líder de todos os 12 pilotos, em tempo real
+  // (feedback do PO: ajuda a validar a simulação de corrida durante o jogo)
+  private hudLeaderboardTexts: Phaser.GameObjects.Text[] = [];
 
   private challengeActive = false;
   private challengeStartTime = 0;
@@ -296,6 +304,31 @@ export class RaceScene extends Phaser.Scene {
     this.hudEventText = this.add.text(CANVAS_WIDTH - 16, 64, '', {
       fontSize: '10px', color: '#8899aa',
     }).setOrigin(1, 0);
+
+    this.buildLeaderboardPanel();
+  }
+
+  /** Painel lateral esquerdo com o gap ao líder de todos os 12 pilotos (não só o carro da frente). */
+  private buildLeaderboardPanel(): void {
+    const rowH = 14, padding = 4, gridSize = 12;
+    const panelW = 112, panelH = rowH * gridSize + padding * 2;
+    this.add.rectangle(0, HUD_HEIGHT, panelW, panelH, 0x000000, 0.5).setOrigin(0, 0);
+    for (let i = 0; i < gridSize; i++) {
+      const t = this.add.text(4, HUD_HEIGHT + padding + i * rowH, '', {
+        fontSize: '10px', color: '#cccccc', fontFamily: 'monospace',
+      });
+      this.hudLeaderboardTexts.push(t);
+    }
+  }
+
+  private updateLeaderboardPanel(standings: GridStanding[]): void {
+    standings.forEach((s, i) => {
+      const t = this.hudLeaderboardTexts[i];
+      if (!t) return;
+      const gapStr = s.position === 1 ? 'Líder' : `+${s.gapToLeader.toFixed(3).replace('.', ',')}s`;
+      t.setText(`P${String(s.position).padStart(2, ' ')} ${gapStr}`);
+      t.setColor(s.isPlayer ? '#ffdd33' : s.isTeammate ? '#33ddff' : '#cccccc');
+    });
   }
 
   private updateHud(): void {
@@ -323,6 +356,8 @@ export class RaceScene extends Phaser.Scene {
     this.drawHudNitro(s.nitro, this.carSetup.nitroCharges);
 
     this.hudEventText.setText(eventLabel);
+
+    this.updateLeaderboardPanel(standings);
   }
 
   private drawHudNitro(charges: number, total: number): void {
@@ -345,17 +380,20 @@ export class RaceScene extends Phaser.Scene {
   }
 
   /**
-   * Gap exibido no HUD. Quando o jogador é 1º no grid, `raceState.gapToAhead`
-   * (do core, modelo 1D de "carro da frente") é só uma constante — não existe
-   * "carro da frente" pra quem lidera. Nesse caso, usa a distância real até o
-   * 2º colocado do grid (que já simula os 12 carros de verdade). Nos demais
-   * casos, mantém o gap do core (usado também pra decidir a ultrapassagem —
-   * ver divergência core/grid registrada em Claude-Racing.md §3).
+   * Gap exibido no HUD — sempre relativo ao carro imediatamente à frente na
+   * classificação do grid (não ao líder; feedback do PO). Derivado 100% do
+   * grid (`gapToLeader` de cada standing), a mesma fonte do painel lateral —
+   * evita a divergência com o `raceState.gapToAhead` do core (modelo 1D
+   * separado, ver Claude-Racing.md §3). Líder não tem "carro da frente":
+   * mostra a distância (negativa) até o 2º colocado, ou seja, sua vantagem.
    */
   private displayGap(standings: GridStanding[], playerStanding: GridStanding): number {
-    if (playerStanding.position !== 1) return this.raceState.gapToAhead;
-    const second = standings.find((x) => x.position === 2);
-    return second ? -second.gapToLeader : this.raceState.gapToAhead;
+    if (playerStanding.position === 1) {
+      const second = standings.find((x) => x.position === 2);
+      return second ? -second.gapToLeader : 0;
+    }
+    const ahead = standings.find((x) => x.position === playerStanding.position - 1);
+    return ahead ? playerStanding.gapToLeader - ahead.gapToLeader : this.raceState.gapToAhead;
   }
 
   // ---------- painel inferior (decisões) ----------
@@ -424,7 +462,12 @@ export class RaceScene extends Phaser.Scene {
     this.clearPanel();
     const isSaida = ev.kind === 'saida';
     const isPit = ev.kind === 'pit';
-    const canOvertake = !isSaida && !isPit && canAttemptOvertake(this.raceState.gapToAhead);
+    // `raceState.position` (core, modelo 1D) pode divergir do grid (12 carros
+    // de verdade, ver Claude-Racing.md §3) — sem esse guard, o jogador já
+    // líder no grid podia receber a oferta de ultrapassagem (bug reportado
+    // pelo PO em playtest: gap negativo grande, mas ainda "líder" pro core).
+    const isGridLeader = this.currentStandings().find((x) => x.isPlayer)?.position === 1;
+    const canOvertake = !isSaida && !isPit && !isGridLeader && canAttemptOvertake(this.raceState.gapToAhead);
     const hasNitro = this.raceState.nitro > 0;
 
     if (!canOvertake && !hasNitro) {
@@ -438,16 +481,6 @@ export class RaceScene extends Phaser.Scene {
     this.panel.add(this.add.text(16, y, `${ev.cornerName ?? 'Largada'} — antes de encarar:`, { fontSize: '14px', color: '#fff' }));
     y += 36;
 
-    let nitroBtn: Phaser.GameObjects.Container | undefined;
-    if (hasNitro) {
-      nitroBtn = this.makeButton(16, y, CANVAS_WIDTH - 32, 40, `Nitro: NÃO (${this.raceState.nitro} disponíveis)`, 0x64b5f6, () => {
-        this.pendingNitro = !this.pendingNitro;
-        nitroBtn!.getAt<Phaser.GameObjects.Text>(1).setText(`Nitro: ${this.pendingNitro ? 'SIM' : 'NÃO'} (${this.raceState.nitro} disponíveis)`);
-      });
-      this.panel.add(nitroBtn);
-      y += 48;
-    }
-
     let overtakeBtn: Phaser.GameObjects.Container | undefined;
     if (canOvertake) {
       overtakeBtn = this.makeButton(16, y, CANVAS_WIDTH - 32, 40, 'Tentar ultrapassagem: NÃO', 0xff8a65, () => {
@@ -456,6 +489,26 @@ export class RaceScene extends Phaser.Scene {
       });
       this.panel.add(overtakeBtn);
       y += 48;
+    }
+
+    if (hasNitro) {
+      // Feedback do PO: o toggle+confirmar do nitro não estava claro — agora são
+      // 2 botões diretos (Sim/Não), cada um já define a opção e avança pro desafio.
+      const nitroWord = this.raceState.nitro === 1 ? 'disponível' : 'disponíveis';
+      this.panel.add(this.add.text(16, y, `Usar nitro? (${this.raceState.nitro} ${nitroWord})`, {
+        fontSize: '13px', color: '#ccc',
+      }));
+      y += 22;
+      const gap = 8;
+      const halfW = (CANVAS_WIDTH - 32 - gap) / 2;
+      const goWithNitro = (useNitro: boolean) => {
+        this.pendingNitro = useNitro;
+        if (this.pendingOvertake) setOvertakeAttempt(this.raceState, true);
+        this.startTimingChallenge(ev);
+      };
+      this.panel.add(this.makeButton(16, y, halfW, 44, 'Nitro: SIM', 0x64b5f6, () => goWithNitro(true)));
+      this.panel.add(this.makeButton(16 + halfW + gap, y, halfW, 44, 'Nitro: NÃO', 0x455a64, () => goWithNitro(false)));
+      return;
     }
 
     const confirmBtn = this.makeButton(16, y, CANVAS_WIDTH - 32, 40, 'Confirmar', 0x81c784, () => {

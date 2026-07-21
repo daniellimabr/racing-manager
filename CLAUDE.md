@@ -3,7 +3,7 @@
 > Documento vivo de contexto do projeto. Anexar no início de novas conversas/tarefas.
 > Ao decidir algo, mover o item de "Questões em aberto" para "Decisões" com a data.
 > Documentos companheiros: Claude-Marketing.md (produto/mercado, CPO) e Claude-Tech.md (engenharia/backlog, CTO). Cada agente de trilha (TechLead-Racing, TechLead-Manager) mantém seu próprio Claude-Racing.md / Claude-Manager.md — ver protocolo na seção 1.1 do Claude-Tech.md.
-> Última atualização: 2026-07-20 (rodada 7 — decisão "roxo também desgasta a saúde" implementada no core; boosts "reparo rápido", "nitro extra" e "recuperação de erro" implementados (6 de 8 conceitos do §6.1 agora no core); boost "pneu novo" renomeado para refletir o efeito de verdade)
+> Última atualização: 2026-07-20 (rodada 8 — feedback de playtest do PO: layout de Spa refeito a partir da referência oficial (SVG+imagem), skill `track-layout` + agente `track-layout-validator` criados para isso ser repetível em outras pistas; UX do nitro trocada de toggle+confirmar para 2 botões diretos Sim/Não; boost "pneu" renomeado de novo, agora para "Bono, My Tyres"; HUD ganhou painel de gap-ao-líder de todos os pilotos)
 
 ## 1. Visão
 
@@ -58,6 +58,7 @@ Fantasia do jogador: ser o dono/gestor de uma equipe de corrida — e também o 
 | 2026-07-18 | **Extra — Cargos contratáveis da equipe:** 2º piloto, engenheiro de corrida (racing engineer), chefe de mecânicos (lead mechanic), equipe de pit stop, equipe de marketing. Um de cada por time |
 | 2026-07-20 | **Roxo também desgasta a saúde do carro:** acertar a zona perfeita (roxa) agora consome uma pequena fatia de saúde do carro, não só os erros — correr no limite tem custo, mesmo pilotando bem. O boost "Reparo rápido" (§6.1) recupera saúde na próxima frenagem/pit para compensar essa tensão. Implementado e calibrado via harness nesta rodada (ver Claude-Racing.md) |
 | 2026-07-20 | **Boost "Pneu novo" renomeado:** não há troca física de pneu na mecânica (só melhora a zona de acerto por 1 evento) — renomeado para **"Temperatura de pneu ideal"** para não sugerir um pit stop. Efeito inalterado |
+| 2026-07-20 | **Boost "Temperatura de pneu ideal" renomeado para "Bono, My Tyres":** referência à icônica frase de rádio de Lewis Hamilton ("Bono, my tyres are gone"). Pedido direto do PO após playtest; efeito inalterado (só o nome exibido no `BOOST_LABELS`) |
 
 ## 4. Mapeamento Archero → Racing Manager (referência de design)
 
@@ -103,7 +104,7 @@ Nenhuma pergunta estrutural em aberto no momento. Pendências de **conteúdo/det
 Cada saída elegível (largada, última saída de cada volta) oferece 1 de 3 opções sorteadas de uma lista de 6/8, efeito válido só para a corrida atual. **Status de implementação no core, atualizado na rodada 7 (ver Claude-Racing.md para detalhe técnico):**
 
 - **Nitro extra** ✅ implementado: +1 carga de nitro disponível, concedida na hora (não fica pendente para o próximo evento como os demais)
-- **Temperatura de pneu ideal** ✅ implementado (renomeado nesta rodada — não há troca física de pneu): aumenta a zona "verde/roxa" de precisão na próxima frenagem/pit (simplificação da versão "próximas 3 curvas" original — vale reavaliar após playtest se o efeito de 1 evento só for curto demais)
+- **Bono, My Tyres** (ex-"Temperatura de pneu ideal", ex-"Pneu novo") ✅ implementado: aumenta a zona "verde/roxa" de precisão na próxima frenagem/pit (simplificação da versão "próximas 3 curvas" original — vale reavaliar após playtest se o efeito de 1 evento só for curto demais)
 - **Freio reforçado** ✅ implementado: reduz o dano ao errar a próxima frenagem/pit
 - **Reparo rápido** ✅ implementado: recupera uma fatia de saúde na próxima frenagem/pit resolvida
 - **Janela ampliada** ✅ implementado nesta rodada (estava na lista desde a rodada 6 mas sem nenhum efeito real no código — bug corrigido): aumenta o tempo disponível para acertar o timing na próxima frenagem/pit

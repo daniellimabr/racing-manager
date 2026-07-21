@@ -58,7 +58,7 @@ export const TIER_COLORS: Record<Tier, number> = {
 };
 
 export const BOOST_LABELS: Record<BoostId, string> = {
-  pneu: 'Temperatura de pneu ideal',
+  pneu: 'Bono, My Tyres',
   freio: 'Freio reforçado',
   janela: 'Janela ampliada',
   reparo_rapido: 'Reparo rápido',
