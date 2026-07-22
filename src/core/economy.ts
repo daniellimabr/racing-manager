@@ -119,11 +119,26 @@ export interface RaceRewardResult {
   gold: number;
   /** Peças sorteadas nesta corrida (antes de fusão). */
   partsDropped: PartDrop[];
+  /** Aura ganha nesta corrida (E-305, sessão 14) — só pódio, ver `AURA_BY_PODIUM`. Opcional (default 0 em `applyRaceRewards`) pra não quebrar fixtures de teste antigas que só testavam Gold/peças. */
+  aura?: number;
 }
 
 /**
- * Calcula a recompensa de 1 corrida (Gold líquido + peças sorteadas). Não
- * aplica nada a nenhum estado persistido — isso é papel do
+ * Aura ganha ao final de uma corrida — só pódio (P1-P3), valores pequenos de
+ * propósito (mesmo racional de `GOLD_BY_POSITION`, mas Aura é a moeda
+ * premium: precisa continuar rara). Fora do pódio, 0. Comprar Aura com
+ * dinheiro real continua fora de escopo (CLAUDE.md §7) — esta é a ÚNICA fonte
+ * de Aura modelada nesta sessão.
+ */
+const AURA_BY_PODIUM: Record<number, number> = { 1: 5, 2: 3, 3: 1 };
+
+export function auraForPosition(position: number): number {
+  return AURA_BY_PODIUM[Math.round(position)] ?? 0;
+}
+
+/**
+ * Calcula a recompensa de 1 corrida (Gold líquido + peças sorteadas + Aura de
+ * pódio). Não aplica nada a nenhum estado persistido — isso é papel do
  * `src/persistence/gameSave.ts` (`applyRaceRewards`), que soma ao save e roda
  * a fusão automática.
  */
@@ -131,7 +146,8 @@ export function computeRaceRewards(input: RaceRewardInput, rng: () => number = M
   const base = goldForPosition(input.position);
   const gold = Math.max(0, base - input.goldPenalty);
   const partsDropped = rollPartDropsForRace(input.position, rng);
-  return { gold, partsDropped };
+  const aura = auraForPosition(input.position);
+  return { gold, partsDropped, aura };
 }
 
 // ---------------------------------------------------------------------------

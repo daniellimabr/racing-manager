@@ -6,6 +6,8 @@ import {
 } from '../core/economy.js';
 import { DEFAULT_CAR_SETUP } from '../core/constants.js';
 import { loadGame, spendEnergyForRace, type GameSave } from '../persistence/gameSave.js';
+import { findPilot, pilotTierWeights, pilotPaceFactor, pilotDevCarroBonus } from '../core/pilots.js';
+import type { TeammateProfile } from '../core/grid.js';
 import { CANVAS_WIDTH, CANVAS_HEIGHT } from './viewConstants.js';
 import { juice } from './juice.js';
 
@@ -24,6 +26,7 @@ export class HubScene extends Phaser.Scene {
   private energyLabelText!: Phaser.GameObjects.Text;
   private energyTimerText!: Phaser.GameObjects.Text;
   private goldText!: Phaser.GameObjects.Text;
+  private auraText!: Phaser.GameObjects.Text;
   private runButtonBg!: Phaser.GameObjects.Rectangle;
   private runButtonText!: Phaser.GameObjects.Text;
   private partsSummaryText!: Phaser.GameObjects.Text;
@@ -53,6 +56,9 @@ export class HubScene extends Phaser.Scene {
     this.buildTutorialButton();
     this.buildOficinaButton();
     this.buildSedeButton();
+    this.buildPilotosButton();
+    this.buildMarketingButton();
+    this.buildLojaButton();
     this.buildEnergyPanel();
     this.buildGoldPanel();
     this.buildPartsSummary();
@@ -86,8 +92,11 @@ export class HubScene extends Phaser.Scene {
       this.add.text(cx, y + cardH - 16, sublabel, { fontSize: '10px', color: '#8899aa' }).setOrigin(0.5);
     };
 
+    const activePilot = this.save.activePilotId ? findPilot(this.save.activePilotId) : undefined;
+    const car2Sublabel = activePilot ? `IA — ${activePilot.name}` : 'IA (perfil padrão — contrate um piloto)';
+
     drawCarCard(16, 'Carro 1', 'Você (piloto titular)', 0xffdd33);
-    drawCarCard(16 + cardW + 16, 'Carro 2', 'IA (companheiro — em breve)', 0x33ddff);
+    drawCarCard(16 + cardW + 16, 'Carro 2', car2Sublabel, 0x33ddff);
   }
 
   /** Reabre a TutorialScene a qualquer momento (sessão 12) — mesmo depois de já ter sido vista/pulada. */
@@ -129,6 +138,51 @@ export class HubScene extends Phaser.Scene {
     });
   }
 
+  /** Leva a Pilotos (E-302, CLAUDE.md §5 tela 3) — contratar/escalar quem guia o Carro 2. */
+  private buildPilotosButton(): void {
+    const bg = this.add.rectangle(CANVAS_WIDTH - 100, 78, 84, 28, 0x2a2e34)
+      .setOrigin(0, 0).setStrokeStyle(1, 0x444a52).setInteractive({ useHandCursor: true });
+    this.add.text(CANVAS_WIDTH - 58, 92, 'PILOTOS', {
+      fontSize: '11px', color: '#ffffff', fontStyle: 'bold',
+    }).setOrigin(0.5);
+    bg.on('pointerdown', () => {
+      juice.click();
+      this.scene.start('PilotosScene');
+    });
+  }
+
+  /**
+   * Leva a Marketing (sessão 14, Claude-Manager.md §5 item 5/6) — escritório
+   * de marketing + patrocinadores da livery. Posicionado no lado ESQUERDO,
+   * abaixo de "COMO JOGAR" (não junto da coluna OFICINA/SEDE/PILOTOS à
+   * direita) — essa coluna já termina a 6px do topo dos cards dos carros
+   * (y=100); um 4º botão empilhado ali entraria por cima do card do Carro 2.
+   */
+  private buildMarketingButton(): void {
+    const bg = this.add.rectangle(16, 46, 100, 28, 0x2a2e34)
+      .setOrigin(0, 0).setStrokeStyle(1, 0x444a52).setInteractive({ useHandCursor: true });
+    this.add.text(66, 60, 'MARKETING', {
+      fontSize: '9px', color: '#ffffff', fontStyle: 'bold',
+    }).setOrigin(0.5);
+    bg.on('pointerdown', () => {
+      juice.click();
+      this.scene.start('MarketingScene');
+    });
+  }
+
+  /** Leva a Loja (E-305, CLAUDE.md §5 tela 6, sessão 14) — baús comprados com Aura. Empilhado abaixo de MARKETING, mesmo lado esquerdo. */
+  private buildLojaButton(): void {
+    const bg = this.add.rectangle(16, 78, 100, 28, 0x2a2e34)
+      .setOrigin(0, 0).setStrokeStyle(1, 0x444a52).setInteractive({ useHandCursor: true });
+    this.add.text(66, 92, 'LOJA', {
+      fontSize: '11px', color: '#ffffff', fontStyle: 'bold',
+    }).setOrigin(0.5);
+    bg.on('pointerdown', () => {
+      juice.click();
+      this.scene.start('LojaScene');
+    });
+  }
+
   private buildEnergyPanel(): void {
     const y = 280;
     this.add.text(16, y, 'ENERGIA', { fontSize: '11px', color: '#8899aa' });
@@ -141,6 +195,7 @@ export class HubScene extends Phaser.Scene {
 
   private buildGoldPanel(): void {
     this.goldText = this.add.text(16, 340, '', { fontSize: '15px', color: '#ffd54f', fontStyle: 'bold' });
+    this.auraText = this.add.text(180, 340, '', { fontSize: '15px', color: '#ba68c8', fontStyle: 'bold' });
   }
 
   /**
@@ -193,6 +248,7 @@ export class HubScene extends Phaser.Scene {
     }
 
     this.goldText.setText(`Gold: ${this.save.gold}`);
+    this.auraText.setText(`Aura: ${this.save.aura}`);
 
     const zoneScale = computeZoneScale(this.save.inventory);
     const lines = PART_SLOTS.map((slot) => {
@@ -210,14 +266,31 @@ export class HubScene extends Phaser.Scene {
     this.runButtonText.setText(affordable ? `CORRER (-${ENERGY_COST_PER_RACE} energia)` : 'Energia insuficiente');
   }
 
+  /**
+   * Piloto escalado pro Carro 2 (E-302/E-303, sessão 14) — sem ninguém
+   * escalado (`activePilotId` nulo, ou apontando pra um piloto que de
+   * alguma forma não existe mais) usa `undefined`, que `core/grid.ts` já
+   * trata como o perfil "Médio" padrão de sempre.
+   */
+  private teammateProfile(): TeammateProfile | undefined {
+    const pilot = this.save.activePilotId ? findPilot(this.save.activePilotId) : undefined;
+    if (!pilot) return undefined;
+    return { weights: pilotTierWeights(pilot), paceFactor: pilotPaceFactor(pilot) };
+  }
+
   private startRace(): void {
     this.save = spendEnergyForRace(this.save, ENERGY_COST_PER_RACE);
     this.updateHud();
 
+    // CLAUDE.md Q8: "a skill de dev. do carro desse 2º piloto beneficia a
+    // equipe inteira" — soma ao zoneScale do próprio jogador, não só ao
+    // desempenho do Carro 2 (que já vem do `teammate` passado à RaceScene).
+    const pilot = this.save.activePilotId ? findPilot(this.save.activePilotId) : undefined;
+    const devCarroBonus = pilot ? pilotDevCarroBonus(pilot) : 0;
     const carSetup: CarSetup = {
       ...DEFAULT_CAR_SETUP,
-      zoneScale: computeZoneScale(this.save.inventory),
+      zoneScale: computeZoneScale(this.save.inventory) + devCarroBonus,
     };
-    this.scene.start('RaceScene', { carSetup });
+    this.scene.start('RaceScene', { carSetup, teammate: this.teammateProfile() });
   }
 }

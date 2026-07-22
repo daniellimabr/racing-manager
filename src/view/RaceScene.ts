@@ -6,7 +6,7 @@ import {
   setOvertakeAttempt, applyBoost, tryUseNitro, raceStandings,
 } from '../core/raceState.js';
 import { tierFromPosition, zoneHalves, computeScale, canAttemptOvertake, combineTiers } from '../core/timing.js';
-import type { GridStanding } from '../core/grid.js';
+import type { GridStanding, TeammateProfile } from '../core/grid.js';
 import { normalizedToScreen, pathIndexToT, pointAtT } from './pathUtils.js';
 import {
   TRACK_RECT, CANVAS_WIDTH, CANVAS_HEIGHT, HUD_HEIGHT, PANEL_HEIGHT,
@@ -80,6 +80,8 @@ interface IconEntry {
 export class RaceScene extends Phaser.Scene {
   private raceState!: RaceState;
   private carSetup: CarSetup = DEFAULT_CAR_SETUP;
+  /** Perfil do piloto escalado pro Carro 2 (E-302/E-303, sessão 14) — `undefined` = perfil "Médio" padrão, ver core/grid.ts. */
+  private teammate?: TeammateProfile;
 
   private trackGraphics!: Phaser.GameObjects.Graphics;
   private icons = new Map<string, IconEntry>();
@@ -119,6 +121,8 @@ export class RaceScene extends Phaser.Scene {
   private lastReward: RaceRewardResult | null = null;
   private lastFusions: FusionResult[] = [];
   private lastGoldTotal = 0;
+  /** Gold efetivamente creditado nesta corrida, já com o bônus dos patrocinadores da livery (sessão 14) — pode ser > `lastReward.gold`. */
+  private lastGoldAdded = 0;
   // Sessão 12 (pendência do Claude-Manager.md §2.8/§5 item 3): avisa quando a
   // fusão automática consome a raridade que o jogador tinha equipado de
   // propósito, mudando o que está de fato equipado sem o jogador ter pedido.
@@ -148,16 +152,18 @@ export class RaceScene extends Phaser.Scene {
   }
 
   /**
-   * Recebe o `carSetup` real do Hub (E-204/E-203) via `scene.start('RaceScene', { carSetup })`.
+   * Recebe o `carSetup` real do Hub (E-204/E-203) via `scene.start('RaceScene', { carSetup, teammate })`.
    * Sem dado (ex.: cena iniciada direto, sem passar pelo Hub) mantém o
-   * `DEFAULT_CAR_SETUP` já usado como valor inicial do campo da classe.
+   * `DEFAULT_CAR_SETUP`/perfil "Médio" padrão já usados como valor inicial.
+   * `teammate` (E-302/E-303, sessão 14): perfil do piloto escalado pro Carro 2.
    */
-  init(data: { carSetup?: CarSetup } = {}): void {
+  init(data: { carSetup?: CarSetup; teammate?: TeammateProfile } = {}): void {
     if (data.carSetup) this.carSetup = data.carSetup;
+    this.teammate = data.teammate;
   }
 
   create(): void {
-    this.raceState = createRace(track, this.carSetup);
+    this.raceState = createRace(track, this.carSetup, { teammate: this.teammate });
     this.raceStartTime = Date.now();
     this.raceEnded = false;
     trackEvent('race_start', { trackId: track.id });
@@ -984,9 +990,15 @@ export class RaceScene extends Phaser.Scene {
     this.panel.setPosition(0, 0).setDepth(501);
 
     const output = toRaceOutput(this.raceState);
+    // Carro 2 (E-303, sessão 14): pontua no campeonato de construtores (CLAUDE.md
+    // Q4) — mostra a posição final do companheiro de equipe, guiado por IA, na
+    // mesma classificação de 12 carros. Sempre "termina" (o grid não simula
+    // DNF pras IAs ainda), então a posição ao vivo já é a final.
+    const teammateStanding = raceStandings(this.raceState).find((s) => s.isTeammate);
     const lines = [
       'Corrida finalizada',
       `Posição: ${output.position}/12`,
+      teammateStanding ? `Carro 2 (companheiro): P${teammateStanding.position}/12` : '',
       `Voltas completadas: ${output.lapsCompleted}/${track.laps}`,
       output.dnf ? `DNF (${output.dnfReason})` : 'Chegou à bandeira quadriculada',
       output.reviveUsed ? 'Revive usado nesta corrida' : '',
@@ -1034,10 +1046,11 @@ export class RaceScene extends Phaser.Scene {
       const equippedBefore = Object.fromEntries(
         PART_SLOTS.map((slot) => [slot, equippedRarity(save.inventory, slot)])
       );
-      const { save: updatedSave, fusions } = applyRaceRewards(save, reward);
+      const { save: updatedSave, fusions, goldAdded } = applyRaceRewards(save, reward);
       this.lastReward = reward;
       this.lastFusions = fusions;
       this.lastGoldTotal = updatedSave.gold;
+      this.lastGoldAdded = goldAdded;
       this.lastEquipChanges = PART_SLOTS
         .map((slot) => ({ slot, from: equippedBefore[slot], to: equippedRarity(updatedSave.inventory, slot) }))
         .filter((c): c is { slot: PartSlot; from: Rarity; to: Rarity } => c.from !== null && c.from !== c.to && c.to !== null);
@@ -1045,7 +1058,9 @@ export class RaceScene extends Phaser.Scene {
 
     if (this.lastReward) {
       lines.push('');
-      lines.push(`+${this.lastReward.gold} Gold (saldo: ${this.lastGoldTotal})`);
+      const bonusNote = this.lastGoldAdded > this.lastReward.gold ? ' (com bônus de patrocinador)' : '';
+      lines.push(`+${this.lastGoldAdded} Gold${bonusNote} (saldo: ${this.lastGoldTotal})`);
+      if (this.lastReward.aura) lines.push(`+${this.lastReward.aura} Aura (pódio!)`);
       for (const drop of this.lastReward.partsDropped) {
         lines.push(`Peça ganha: ${PART_SLOT_LABELS[drop.slot]} (${RARITY_LABELS[drop.rarity]})`);
       }

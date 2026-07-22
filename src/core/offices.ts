@@ -144,3 +144,65 @@ export function upgradeOffice(offices: OfficesState, slot: PartSlot, gold: numbe
     goldSpent: cost,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Escritório de marketing (sessão 14, destravado pelo sistema de
+// patrocinadores da livery, `core/sponsors.ts`) — pendência antiga do E-301
+// (Claude-Manager.md §5 item 5): "não modelado, depende do sistema de
+// patrocinadores existir primeiro". Produz **Reputação** (um contador simples,
+// não peças por raridade — não há "raridade de reputação"), gasta pra
+// contratar patrocinadores. Mesmo padrão de acúmulo passivo + teto +
+// coleta manual dos outros 7 escritórios, mas como um valor escalar único em
+// vez de `Record<Rarity, number>`, porque não faz sentido forçar reputação
+// num modelo pensado pra peças fundíveis.
+// ---------------------------------------------------------------------------
+
+/** Minutos por ponto de Reputação no nível 1 — mesma fórmula de escala por nível dos outros escritórios. */
+export const MARKETING_BASE_MINUTES_PER_POINT = 15;
+export const MARKETING_MAX_LEVEL = 5;
+/** Teto de Reputação pendente de coleta — mesmo espírito do `OFFICE_PENDING_CAP`. */
+export const MARKETING_PENDING_CAP = 20;
+/** Custo em Gold pra subir do nível L pro L+1: `MARKETING_UPGRADE_BASE_COST * L`. */
+export const MARKETING_UPGRADE_BASE_COST = 150;
+
+export interface MarketingOfficeState {
+  level: number;
+  pendingReputacao: number;
+  lastUpdateMs: number;
+}
+
+export function createMarketingOffice(nowMs: number = Date.now()): MarketingOfficeState {
+  return { level: 1, pendingReputacao: 0, lastUpdateMs: nowMs };
+}
+
+/** Aplica a produção de Reputação decorrida — mesmo algoritmo de `applyOneOfficeProduction`, sem o sorteio de raridade. */
+export function applyMarketingProduction(office: MarketingOfficeState, nowMs: number = Date.now()): MarketingOfficeState {
+  if (office.pendingReputacao >= MARKETING_PENDING_CAP) {
+    return { ...office, lastUpdateMs: nowMs };
+  }
+  const intervalMs = (MARKETING_BASE_MINUTES_PER_POINT / office.level) * 60_000;
+  const elapsedMs = Math.max(0, nowMs - office.lastUpdateMs);
+  const pointsElapsed = Math.floor(elapsedMs / intervalMs);
+  if (pointsElapsed <= 0) return office;
+
+  const pointsToAdd = Math.min(pointsElapsed, MARKETING_PENDING_CAP - office.pendingReputacao);
+  const newTotal = office.pendingReputacao + pointsToAdd;
+  const newTimestamp = newTotal >= MARKETING_PENDING_CAP ? nowMs : office.lastUpdateMs + pointsElapsed * intervalMs;
+  return { level: office.level, pendingReputacao: newTotal, lastUpdateMs: newTimestamp };
+}
+
+export function marketingUpgradeCost(currentLevel: number): number | null {
+  if (currentLevel >= MARKETING_MAX_LEVEL) return null;
+  return MARKETING_UPGRADE_BASE_COST * currentLevel;
+}
+
+export interface MarketingUpgradeResult {
+  office: MarketingOfficeState;
+  goldSpent: number;
+}
+
+export function upgradeMarketingOffice(office: MarketingOfficeState, gold: number): MarketingUpgradeResult | null {
+  const cost = marketingUpgradeCost(office.level);
+  if (cost === null || gold < cost) return null;
+  return { office: { ...office, level: office.level + 1 }, goldSpent: cost };
+}

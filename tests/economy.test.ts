@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   ENERGY_MAX, ENERGY_COST_PER_RACE, ENERGY_REGEN_MINUTES_PER_POINT,
   applyEnergyRegen, msUntilNextEnergyPoint, canAffordRace,
-  goldForPosition, computeRaceRewards, rollPartDropsForRace,
+  goldForPosition, computeRaceRewards, rollPartDropsForRace, auraForPosition,
   emptyInventory, receivePart, fuseAll, computeZoneScale, equippedRarity, setEquipped,
   RARITIES, PART_SLOTS,
 } from '../src/core/economy.js';
@@ -70,6 +70,17 @@ describe('gold por posição (E-202)', () => {
   it('computeRaceRewards deduz a penalidade de crash sem ficar negativo', () => {
     const r = computeRaceRewards({ position: 12, dnf: true, goldPenalty: 9999 });
     expect(r.gold).toBe(0);
+  });
+
+  it('computeRaceRewards só dá Aura pro pódio (P1-P3), 0 fora dele (E-305, sessão 14)', () => {
+    expect(computeRaceRewards({ position: 1, dnf: false, goldPenalty: 0 }).aura).toBeGreaterThan(0);
+    expect(computeRaceRewards({ position: 3, dnf: false, goldPenalty: 0 }).aura).toBeGreaterThan(0);
+    expect(computeRaceRewards({ position: 4, dnf: false, goldPenalty: 0 }).aura).toBe(0);
+    expect(computeRaceRewards({ position: 12, dnf: false, goldPenalty: 0 }).aura).toBe(0);
+  });
+
+  it('auraForPosition dá mais pra P1 do que pra P3', () => {
+    expect(auraForPosition(1)).toBeGreaterThan(auraForPosition(3));
   });
 
   it('rollPartDropsForRace nunca sorteia mais que 2 peças', () => {

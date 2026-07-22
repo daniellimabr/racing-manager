@@ -1,11 +1,13 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   loadGame, saveGame, spendEnergyForRace, applyRaceRewards, equipPart, markTutorialSeen,
-  collectOfficeParts, upgradeOfficeLevel,
+  collectOfficeParts, upgradeOfficeLevel, hirePilot, setActivePilot,
+  collectMarketingReputacao, upgradeMarketingOfficeLevel, hireSponsor, releaseSponsor, buyChest,
 } from '../src/persistence/gameSave.js';
 import { clear, saveJSON } from '../src/persistence/storage.js';
 import { ENERGY_MAX, ENERGY_COST_PER_RACE, ENERGY_REGEN_MINUTES_PER_POINT, equippedRarity } from '../src/core/economy.js';
-import { OFFICE_BASE_MINUTES_PER_PART, OFFICE_UPGRADE_BASE_COST } from '../src/core/offices.js';
+import { OFFICE_BASE_MINUTES_PER_PART, OFFICE_UPGRADE_BASE_COST, MARKETING_BASE_MINUTES_PER_POINT, MARKETING_UPGRADE_BASE_COST } from '../src/core/offices.js';
+import { LIVERY_SPONSOR_SLOTS } from '../src/core/sponsors.js';
 
 // Ambiente de teste (vitest) roda em Node — sem `localStorage`, o wrapper cai
 // no fallback em memória (ver storage.ts). `clear` entre testes evita um save
@@ -18,6 +20,12 @@ describe('gameSave (E-205)', () => {
     expect(save.energy).toBe(ENERGY_MAX);
     expect(save.gold).toBe(0);
     expect(save.inventory).toBeDefined();
+    expect(save.pilotRoster).toEqual([]);
+    expect(save.activePilotId).toBeNull();
+    expect(save.marketingOffice.level).toBe(1);
+    expect(save.reputacao).toBe(0);
+    expect(save.hiredSponsorIds).toEqual([]);
+    expect(save.aura).toBe(0);
   });
 
   it('persiste entre chamadas (simula fechar/reabrir o app)', () => {
@@ -89,7 +97,7 @@ describe('gameSave (E-205)', () => {
       saveJSON('save-v1', v1Raw);
 
       const loaded = loadGame(500_000); // mesmo instante do save — sem regen no meio
-      expect(loaded.version).toBe(4);
+      expect(loaded.version).toBe(7);
       expect(loaded.gold).toBe(250);
       expect(loaded.energy).toBe(12);
       // sem escolha própria migrada (equipped ausente) → cai no mesmo fallback automático de sempre
@@ -101,7 +109,7 @@ describe('gameSave (E-205)', () => {
     it('save corrompido/desconhecido não quebra o load — reseta para um save novo', () => {
       saveJSON('save-v1', { lixo: true });
       const loaded = loadGame(0);
-      expect(loaded.version).toBe(4);
+      expect(loaded.version).toBe(7);
       expect(loaded.gold).toBe(0);
       expect(loaded.energy).toBe(ENERGY_MAX);
     });
@@ -137,7 +145,7 @@ describe('gameSave (E-205)', () => {
       };
       saveJSON('save-v1', v2Raw);
       const loaded = loadGame(0);
-      expect(loaded.version).toBe(4);
+      expect(loaded.version).toBe(7);
       expect(loaded.hasSeenTutorial).toBe(true);
     });
 
@@ -225,7 +233,7 @@ describe('gameSave (E-205)', () => {
       };
       saveJSON('save-v1', v3Raw);
       const loaded = loadGame(0);
-      expect(loaded.version).toBe(4);
+      expect(loaded.version).toBe(7);
       expect(loaded.gold).toBe(500); // progresso existente preservado
       expect(loaded.offices.motor.level).toBe(1); // escritório novo, começa do zero
     });
@@ -275,6 +283,201 @@ describe('gameSave (E-205)', () => {
       const save = loadGame(0); // 0 Gold
       const result = upgradeOfficeLevel(save, 'motor');
       expect(result).toBeNull();
+    });
+  });
+
+  describe('Pilotos (E-302, sessão 14)', () => {
+    it('hirePilot debita o Gold certo e adiciona ao roster, persistindo', () => {
+      let save = loadGame(0);
+      save = applyRaceRewards(save, { gold: 1000, partsDropped: [] }).save;
+
+      const hired = hirePilot(save, 'rookie');
+      expect(hired).not.toBeNull();
+      expect(hired!.pilotRoster).toEqual(['rookie']);
+      expect(hired!.gold).toBe(1000 - 300);
+
+      const reloaded = loadGame(0);
+      expect(reloaded.pilotRoster).toEqual(['rookie']); // persistiu
+    });
+
+    it('hirePilot retorna null sem Gold suficiente', () => {
+      const save = loadGame(0); // 0 Gold
+      expect(hirePilot(save, 'rookie')).toBeNull();
+    });
+
+    it('hirePilot retorna null pra um id de piloto desconhecido', () => {
+      let save = loadGame(0);
+      save = applyRaceRewards(save, { gold: 5000, partsDropped: [] }).save;
+      expect(hirePilot(save, 'nao-existe')).toBeNull();
+    });
+
+    it('hirePilot retorna null se o piloto já foi contratado', () => {
+      let save = loadGame(0);
+      save = applyRaceRewards(save, { gold: 5000, partsDropped: [] }).save;
+      save = hirePilot(save, 'rookie')!;
+      expect(hirePilot(save, 'rookie')).toBeNull();
+    });
+
+    it('setActivePilot escala um piloto do roster e persiste', () => {
+      let save = loadGame(0);
+      save = applyRaceRewards(save, { gold: 5000, partsDropped: [] }).save;
+      save = hirePilot(save, 'rookie')!;
+
+      const activated = setActivePilot(save, 'rookie');
+      expect(activated).not.toBeNull();
+      expect(activated!.activePilotId).toBe('rookie');
+
+      const reloaded = loadGame(0);
+      expect(reloaded.activePilotId).toBe('rookie'); // persistiu
+    });
+
+    it('setActivePilot retorna null pra um piloto fora do roster', () => {
+      const save = loadGame(0);
+      expect(setActivePilot(save, 'rookie')).toBeNull();
+    });
+
+    it('setActivePilot(null) desescala, voltando pro perfil padrão', () => {
+      let save = loadGame(0);
+      save = applyRaceRewards(save, { gold: 5000, partsDropped: [] }).save;
+      save = hirePilot(save, 'rookie')!;
+      save = setActivePilot(save, 'rookie')!;
+
+      const deactivated = setActivePilot(save, null);
+      expect(deactivated).not.toBeNull();
+      expect(deactivated!.activePilotId).toBeNull();
+    });
+  });
+
+  describe('Marketing e patrocinadores da livery (sessão 14, Claude-Manager.md §5 item 5/6)', () => {
+    it('produção passiva de Reputação acumula e loadGame aplica antes de retornar', () => {
+      loadGame(0);
+      const intervalMs = MARKETING_BASE_MINUTES_PER_POINT * 60_000;
+      const reloaded = loadGame(intervalMs * 2);
+      expect(reloaded.marketingOffice.pendingReputacao).toBe(2);
+    });
+
+    it('collectMarketingReputacao move a produção pendente pro saldo e persiste', () => {
+      const intervalMs = MARKETING_BASE_MINUTES_PER_POINT * 60_000;
+      loadGame(0);
+      const withProduction = loadGame(intervalMs * 3);
+      expect(withProduction.marketingOffice.pendingReputacao).toBe(3);
+
+      const collected = collectMarketingReputacao(withProduction);
+      expect(collected.reputacao).toBe(3);
+      expect(collected.marketingOffice.pendingReputacao).toBe(0);
+
+      const reloaded = loadGame(intervalMs * 3); // mesmo instante — sem produção nova no meio
+      expect(reloaded.reputacao).toBe(3);
+    });
+
+    it('upgradeMarketingOfficeLevel debita o Gold certo e sobe o nível, persistindo', () => {
+      let save = loadGame(0);
+      save = applyRaceRewards(save, { gold: 1000, partsDropped: [] }).save;
+
+      const upgraded = upgradeMarketingOfficeLevel(save);
+      expect(upgraded).not.toBeNull();
+      expect(upgraded!.marketingOffice.level).toBe(2);
+      expect(upgraded!.gold).toBe(1000 - MARKETING_UPGRADE_BASE_COST);
+    });
+
+    it('upgradeMarketingOfficeLevel retorna null sem Gold suficiente', () => {
+      const save = loadGame(0); // 0 Gold
+      expect(upgradeMarketingOfficeLevel(save)).toBeNull();
+    });
+
+    it('hireSponsor debita a Reputação certa e adiciona à lista de contratados, persistindo', () => {
+      const intervalMs = MARKETING_BASE_MINUTES_PER_POINT * 60_000;
+      let save = loadGame(0);
+      save = loadGame(intervalMs * 20); // acumula Reputação suficiente (teto)
+      save = collectMarketingReputacao(save);
+      const reputacaoBefore = save.reputacao;
+
+      const hired = hireSponsor(save, 'oficina-local'); // custa 20 Reputação
+      expect(hired).not.toBeNull();
+      expect(hired!.hiredSponsorIds).toEqual(['oficina-local']);
+      expect(hired!.reputacao).toBe(reputacaoBefore - 20);
+
+      const reloaded = loadGame(intervalMs * 20);
+      expect(reloaded.hiredSponsorIds).toEqual(['oficina-local']); // persistiu
+    });
+
+    it('hireSponsor retorna null sem Reputação suficiente, com id desconhecido, já contratado, ou sem posição livre', () => {
+      let save = loadGame(0);
+      expect(hireSponsor(save, 'oficina-local')).toBeNull(); // 0 Reputação
+
+      save = { ...save, reputacao: 10_000 };
+      expect(hireSponsor(save, 'nao-existe')).toBeNull();
+
+      save = hireSponsor(save, 'oficina-local')!;
+      expect(hireSponsor(save, 'oficina-local')).toBeNull(); // já contratado
+
+      // enche as 6 posições com os outros patrocinadores disponíveis
+      const others = ['posto-combustivel', 'pneus-veloz', 'bebida-energetica', 'banco-regional', 'seguradora-nacional'];
+      for (const id of others) save = hireSponsor(save, id)!;
+      expect(save.hiredSponsorIds.length).toBe(LIVERY_SPONSOR_SLOTS);
+      expect(hireSponsor(save, 'montadora-parceira')).toBeNull(); // sem posição livre
+    });
+
+    it('releaseSponsor libera 1 posição, sem reembolso de Reputação, e persiste', () => {
+      let save = { ...loadGame(0), reputacao: 100 };
+      save = hireSponsor(save, 'oficina-local')!;
+      expect(save.hiredSponsorIds).toEqual(['oficina-local']);
+
+      const released = releaseSponsor(save, 'oficina-local');
+      expect(released.hiredSponsorIds).toEqual([]);
+      expect(released.reputacao).toBe(80); // sem reembolso
+
+      const reloaded = loadGame(0);
+      expect(reloaded.hiredSponsorIds).toEqual([]); // persistiu
+    });
+
+    it('applyRaceRewards aplica o bônus de Gold dos patrocinadores contratados', () => {
+      let save = { ...loadGame(0), reputacao: 100 };
+      save = hireSponsor(save, 'oficina-local')!; // +3% Gold
+
+      const result = applyRaceRewards(save, { gold: 100, partsDropped: [] });
+      expect(result.goldAdded).toBe(103); // 100 * 1.03
+      expect(result.save.gold).toBe(103);
+    });
+
+    it('applyRaceRewards não altera o Gold sem nenhum patrocinador contratado', () => {
+      const save = loadGame(0);
+      const result = applyRaceRewards(save, { gold: 100, partsDropped: [] });
+      expect(result.goldAdded).toBe(100);
+    });
+  });
+
+  describe('Loja/baús + Aura (E-305, sessão 14)', () => {
+    it('applyRaceRewards soma Aura de pódio ao save', () => {
+      const save = loadGame(0);
+      const result = applyRaceRewards(save, { gold: 100, partsDropped: [], aura: 5 });
+      expect(result.save.aura).toBe(5);
+
+      const reloaded = loadGame(0);
+      expect(reloaded.aura).toBe(5); // persistiu
+    });
+
+    it('applyRaceRewards não altera Aura sem reward.aura (fixture antiga, sem pódio)', () => {
+      const save = loadGame(0);
+      const result = applyRaceRewards(save, { gold: 100, partsDropped: [] });
+      expect(result.save.aura).toBe(0);
+    });
+
+    it('buyChest debita a Aura certa, entrega as peças e roda fusão, persistindo', () => {
+      const save = { ...loadGame(0), aura: 100 };
+      const result = buyChest(save, 'bronze', () => 0); // rng=0 → sempre gray, determinístico
+      expect(result).not.toBeNull();
+      expect(result!.save.aura).toBe(90); // bronze custa 10
+      expect(result!.partsDropped.length).toBe(1);
+      expect(result!.save.inventory.counts[result!.partsDropped[0].slot].gray).toBe(1);
+
+      const reloaded = loadGame(0);
+      expect(reloaded.aura).toBe(90); // persistiu
+    });
+
+    it('buyChest retorna null sem Aura suficiente, sem persistir nada', () => {
+      const save = loadGame(0); // 0 Aura
+      expect(buyChest(save, 'bronze')).toBeNull();
     });
   });
 });

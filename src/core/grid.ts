@@ -51,10 +51,23 @@ const AI_TEAMS: TeamSpec[] = [
   { teamId: 'echo', paceFactor: 0.94, weights: { purple: 0.08, green: 0.30, amber: 0.40, red: 0.17, miss: 0.05 } },
 ];
 
-/** perfil "Médio" como padrão do companheiro de equipe até M2 (skill de piloto contratável) */
+/** perfil "Médio" — padrão do companheiro de equipe até o jogador contratar um piloto de verdade (E-302, sessão 14). */
 const TEAMMATE_WEIGHTS: Record<Tier, number> = { purple: 0.15, green: 0.40, amber: 0.35, red: 0.08, miss: 0.02 };
+const TEAMMATE_DEFAULT_PACE = 1.0;
 
-export function createGridSim(rng: () => number = Math.random): GridState {
+export interface TeammateProfile {
+  weights: Record<Tier, number>;
+  paceFactor: number;
+}
+
+/**
+ * `teammate` (E-302/E-303, sessão 14): perfil do piloto contratado escalado
+ * pra guiar o Carro 2 (`core/pilots.ts` — `pilotTierWeights`/`pilotPaceFactor`
+ * calculam isso a partir das skills). Sem contratar ninguém ainda, usa o
+ * perfil "Médio" fixo de sempre — nenhuma mudança de comportamento pra quem
+ * não mexeu nisso.
+ */
+export function createGridSim(rng: () => number = Math.random, teammate?: TeammateProfile): GridState {
   const cars: GridCarDef[] = [];
 
   AI_TEAMS.forEach((team) => {
@@ -76,8 +89,8 @@ export function createGridSim(rng: () => number = Math.random): GridState {
     label: 'Companheiro',
     teamId: 'player',
     isTeammate: true,
-    paceFactor: 1.0,
-    weights: TEAMMATE_WEIGHTS,
+    paceFactor: teammate?.paceFactor ?? TEAMMATE_DEFAULT_PACE,
+    weights: teammate?.weights ?? TEAMMATE_WEIGHTS,
   });
 
   // grid de largada: ordena por pace e espalha em ~0.4s por posição, centrado

@@ -4,7 +4,7 @@ import type {
 } from './types.js';
 import { buildEventSequence } from './track.js';
 import { createGridSim, advanceGrid, deriveStandings } from './grid.js';
-import type { GridStanding } from './grid.js';
+import type { GridStanding, TeammateProfile } from './grid.js';
 import {
   GAIN, DAMAGE, NITRO_GOOD_BONUS, NITRO_BAD_RELIEF,
   REPAIR_BOOST_AMOUNT, ERROR_RECOVERY_RELIEF, PLAYER_GRID_PACE_SCALE,
@@ -42,7 +42,7 @@ function derivePlayerStanding(state: RaceState): GridStanding {
 export function createRace(
   track: TrackDef,
   setup: CarSetup,
-  opts: { startProgress?: number; rng?: () => number } = {}
+  opts: { startProgress?: number; rng?: () => number; teammate?: TeammateProfile } = {}
 ): RaceState {
   const raceProgress = opts.startProgress ?? 0;
   const state: RaceState = {
@@ -53,7 +53,7 @@ export function createRace(
     health: setup.healthMax,
     healthMax: setup.healthMax,
     position: 1, // recalculado abaixo, já com o grid pronto
-    grid: createGridSim(opts.rng),
+    grid: createGridSim(opts.rng, opts.teammate),
     raceProgress,
     gapToAhead: 0, // recalculado abaixo
     nitro: setup.nitroCharges,

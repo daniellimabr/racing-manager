@@ -5,6 +5,9 @@ import { HubScene } from './HubScene.js';
 import { OficinaScene } from './OficinaScene.js';
 import { TutorialScene } from './TutorialScene.js';
 import { SedeScene } from './SedeScene.js';
+import { PilotosScene } from './PilotosScene.js';
+import { MarketingScene } from './MarketingScene.js';
+import { LojaScene } from './LojaScene.js';
 import { CANVAS_WIDTH, CANVAS_HEIGHT } from './viewConstants.js';
 import { initPostHogFromEnv, track } from '../telemetry/analytics.js';
 
@@ -38,5 +41,11 @@ new Phaser.Game({
   // também acessível a qualquer momento via botão "Como jogar" no Hub.
   // SedeScene (E-301, sessão 13): escritórios de produção passiva, acessível
   // via botão "SEDE" no Hub.
-  scene: [HubScene, RaceScene, OficinaScene, TutorialScene, SedeScene],
+  // PilotosScene (E-302, sessão 14): contratar/escalar quem guia o Carro 2,
+  // acessível via botão "PILOTOS" no Hub.
+  // MarketingScene (sessão 14): escritório de marketing + patrocinadores da
+  // livery, acessível via botão "MARKETING" no Hub.
+  // LojaScene (E-305, sessão 14): baús comprados com Aura, acessível via
+  // botão "LOJA" no Hub.
+  scene: [HubScene, RaceScene, OficinaScene, TutorialScene, SedeScene, PilotosScene, MarketingScene, LojaScene],
 });

@@ -3,6 +3,8 @@ import {
   createOffices, applyOfficesProduction, collectOffice, upgradeOffice,
   officeUpgradeCost, OFFICE_BASE_MINUTES_PER_PART, OFFICE_PENDING_CAP, OFFICE_MAX_LEVEL,
   OFFICE_UPGRADE_BASE_COST,
+  createMarketingOffice, applyMarketingProduction, upgradeMarketingOffice, marketingUpgradeCost,
+  MARKETING_BASE_MINUTES_PER_POINT, MARKETING_PENDING_CAP, MARKETING_MAX_LEVEL, MARKETING_UPGRADE_BASE_COST,
 } from '../src/core/offices.js';
 
 describe('createOffices', () => {
@@ -86,5 +88,52 @@ describe('upgradeOffice', () => {
     expect(officeUpgradeCost(OFFICE_MAX_LEVEL)).toBeNull();
     const result = upgradeOffice(offices, 'motor', 999_999);
     expect(result).toBeNull();
+  });
+});
+
+describe('escritório de marketing (sessão 14 — destravado pelo sistema de patrocinadores)', () => {
+  it('createMarketingOffice começa nível 1, sem Reputação pendente', () => {
+    const office = createMarketingOffice(0);
+    expect(office.level).toBe(1);
+    expect(office.pendingReputacao).toBe(0);
+  });
+
+  it('produz 1 ponto de Reputação por intervalo decorrido, no nível 1', () => {
+    const office = createMarketingOffice(0);
+    const intervalMs = MARKETING_BASE_MINUTES_PER_POINT * 60_000;
+    const updated = applyMarketingProduction(office, intervalMs * 3);
+    expect(updated.pendingReputacao).toBe(3);
+  });
+
+  it('nível mais alto produz mais rápido (proporcional ao nível)', () => {
+    const office = { ...createMarketingOffice(0), level: 2 };
+    const intervalMs = MARKETING_BASE_MINUTES_PER_POINT * 60_000;
+    const updated = applyMarketingProduction(office, intervalMs);
+    expect(updated.pendingReputacao).toBe(2);
+  });
+
+  it('não passa do teto de Reputação pendente, mesmo com muito tempo decorrido', () => {
+    const office = createMarketingOffice(0);
+    const intervalMs = MARKETING_BASE_MINUTES_PER_POINT * 60_000;
+    const updated = applyMarketingProduction(office, intervalMs * 1000);
+    expect(updated.pendingReputacao).toBe(MARKETING_PENDING_CAP);
+  });
+
+  it('upgradeMarketingOffice custa MARKETING_UPGRADE_BASE_COST * nível atual, e sobe 1 nível', () => {
+    const office = createMarketingOffice(0);
+    const cost = marketingUpgradeCost(1);
+    expect(cost).toBe(MARKETING_UPGRADE_BASE_COST);
+    const result = upgradeMarketingOffice(office, cost!);
+    expect(result).not.toBeNull();
+    expect(result!.office.level).toBe(2);
+    expect(result!.goldSpent).toBe(cost);
+  });
+
+  it('upgradeMarketingOffice retorna null sem Gold suficiente ou no nível máximo', () => {
+    const office = createMarketingOffice(0);
+    expect(upgradeMarketingOffice(office, 1)).toBeNull();
+    const maxed = { ...office, level: MARKETING_MAX_LEVEL };
+    expect(marketingUpgradeCost(MARKETING_MAX_LEVEL)).toBeNull();
+    expect(upgradeMarketingOffice(maxed, 999_999)).toBeNull();
   });
 });
