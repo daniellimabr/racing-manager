@@ -279,6 +279,28 @@ export function collectOfficeParts(save: GameSave, slot: PartSlot): ApplyRewards
 }
 
 /**
+ * Coleta a produção pendente de TODOS os escritórios de uma vez (botão
+ * "Coletar tudo" da Sede, pedido do PO). Mesmo espírito de
+ * `collectOfficeParts`, só que dobrado pra 1 volta só nos 7 escritórios em
+ * vez de 7 chamadas separadas — 1 save só no final, e as fusões de todos os
+ * escritórios juntas numa lista só (a ordem de `PART_SLOTS` é a mesma usada
+ * pela Oficina/Sede em outros lugares).
+ */
+export function collectAllOfficeParts(save: GameSave): ApplyRewardsResult {
+  let offices = save.offices;
+  const inventory = cloneInventory(save.inventory);
+  for (const slot of PART_SLOTS) {
+    const result = collectOffice(offices, slot);
+    offices = result.offices;
+    for (const part of result.collected) receivePart(inventory, part.slot, part.rarity);
+  }
+  const fusions = fuseAll(inventory);
+  const updated: GameSave = { ...save, offices, inventory };
+  saveGame(updated);
+  return { save: updated, fusions };
+}
+
+/**
  * Sobe 1 nível um escritório (Sede, E-301), debitando o custo em Gold. `null`
  * = não aplicado (sem Gold suficiente ou escritório já no nível máximo) —
  * mesmo padrão defensivo de `equipPart`.

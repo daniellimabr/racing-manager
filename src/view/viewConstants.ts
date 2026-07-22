@@ -8,12 +8,14 @@ export const CANVAS_WIDTH = 480;
 export const CANVAS_HEIGHT = 800;
 
 /**
- * 78 → 108 na sessão 15: nova linha dedicada aos toggles persistentes de
- * ultrapassagem/nitro (`buildToggleButtons`, RaceScene.ts), que substituíram
- * as telas de decisão bloqueantes — precisa de um espaço fixo próprio, sem
- * disputar lugar com o texto de posição/volta/gap já existente.
+ * 78 → 108 → 78 de novo na sessão 15: a 2ª rodada tinha aberto uma linha
+ * dedicada no HUD pros toggles de ultrapassagem/nitro; a 3ª rodada (feedback
+ * do PO: aparência parecida com o painel de gaps + mais perto do botão do
+ * desafio) moveu os toggles pra cima do painel inferior (`buildToggleButtons`,
+ * perto de `PANEL_Y`) em vez do topo do HUD — não precisa mais da linha
+ * extra aqui.
  */
-export const HUD_HEIGHT = 108;
+export const HUD_HEIGHT = 78;
 export const PANEL_HEIGHT = 220;
 export const TRACK_RECT = {
   x: 10,
@@ -140,8 +142,36 @@ export const TWEEN_DURATION_MS = 1000;
 export const NORMAL_LEG_SPEED_T_PER_MS = 0.00003;
 /** Quanto maior, mais lento o "bullet time" (divide a velocidade normal de avanço durante a decisão/desafio ativo). */
 export const BULLET_TIME_SLOWDOWN = 10;
-/** Fração máxima da distância até o próximo evento que o avanço contínuo pode cobrir antes de `advance()` commitar a transição (nunca chega a 100%, evita "ultrapassar" visualmente um evento ainda não resolvido). */
+/** Fração máxima da distância até o alvo (`EVENT_LOOKAHEAD_STEPS` eventos à frente) que o avanço contínuo pode cobrir antes de `advance()` commitar a transição (nunca chega a 100%, evita "ultrapassar" visualmente um evento ainda não resolvido). */
 export const LEG_PROGRESS_CAP = 0.95;
+
+/**
+ * Sessão 15, 3ª rodada (feedback do PO: "os carros ainda estão parando no
+ * mapa, aguardando o input do desafio"): mirar só no PRÓXIMO evento
+ * (`eventIndex+1`) não bastava — pra qualquer curva, a perna frenagem→saída
+ * (mesma curva) é bem curta (só 0,5 de 20 `pathIndex`, ~2,5% da volta).
+ * Medido direto (`RaceScene.visualPlayerT`, sessão de diagnóstico via
+ * Playwright): o avanço batia no teto (`LEG_PROGRESS_CAP`) em bem menos de
+ * 1s e FICAVA PARADO os ~4,4s restantes da frenagem de 2 etapas — exatamente
+ * o "parado esperando" que o PO reportou, não uma percepção errada.
+ *
+ * Mirando alguns eventos à frente (não só o próximo), a perna cobre bem mais
+ * que 1 corner-a-corner de verdade em Spa — distância de sobra pra nunca
+ * bater no teto dentro da janela de um desafio normal (mesmo o pior caso,
+ * frenagem em 2 etapas + boost, gira uns 3,5-4s; na velocidade de bullet
+ * time isso cobre só ~1% da volta). `advance()` continua sendo o único ponto
+ * que de fato "commita" a posição — este valor só afeta até onde o avanço
+ * contínuo pode chegar SEM ultrapassar visualmente eventos ainda não
+ * resolvidos.
+ *
+ * 2 já resolvia a maioria dos casos, mas sobrava um resíduo específico: como
+ * a largada e a frenagem da 1ª curva de Spa compartilham o mesmo `pathIndex`
+ * (0 — ver `pathIndexForEvent`), o avanço já feito durante a largada "come"
+ * parte do teto da frenagem seguinte (o teto é medido a partir do MESMO
+ * `curT`=0 pros dois eventos) — sobrava menos folga do que o normal bem no
+ * início da corrida. Subido pra 4 pra dar folga mesmo nesse caso.
+ */
+export const EVENT_LOOKAHEAD_STEPS = 4;
 /** Meia-vida (ms) da suavização de polimento por ícone — absorve saltos pequenos de gap entre carros (ex.: ultrapassagem registrada no grid), não representa mais a velocidade geral do crawl (isso agora é NORMAL_LEG_SPEED_T_PER_MS/BULLET_TIME_SLOWDOWN). */
 export const VISUAL_CATCHUP_HALFLIFE_MS = 220;
 

@@ -1,12 +1,15 @@
 import Phaser from 'phaser';
 import { PART_SLOTS, PART_SLOT_LABELS, RARITIES, RARITY_LABELS, type Rarity, type PartSlot } from '../core/economy.js';
 import { OFFICE_MAX_LEVEL, officeUpgradeCost } from '../core/offices.js';
-import { loadGame, collectOfficeParts, upgradeOfficeLevel, type GameSave } from '../persistence/gameSave.js';
+import {
+  loadGame, collectOfficeParts, collectAllOfficeParts, upgradeOfficeLevel, type GameSave,
+} from '../persistence/gameSave.js';
 import { CANVAS_WIDTH, CANVAS_HEIGHT } from './viewConstants.js';
 import { juice } from './juice.js';
 
 const ROW_HEIGHT = 88;
-const FIRST_ROW_Y = 96;
+// 96 → 132: abre espaço pro botão "Coletar tudo" (pedido do PO) logo acima da lista de escritórios.
+const FIRST_ROW_Y = 132;
 
 interface OfficeRow {
   levelText: Phaser.GameObjects.Text;
@@ -27,6 +30,7 @@ export class SedeScene extends Phaser.Scene {
   private save!: GameSave;
   private goldText!: Phaser.GameObjects.Text;
   private rows: Partial<Record<PartSlot, OfficeRow>> = {};
+  private collectAllBtn?: Phaser.GameObjects.Container;
 
   constructor() {
     super('SedeScene');
@@ -47,9 +51,38 @@ export class SedeScene extends Phaser.Scene {
     this.goldText = this.add.text(16, 74, '', { fontSize: '13px', color: '#ffd54f', fontStyle: 'bold' });
 
     this.buildBackButton();
+    this.buildCollectAllButton();
     PART_SLOTS.forEach((slot, i) => this.buildOfficeRow(slot, FIRST_ROW_Y + i * ROW_HEIGHT));
 
     this.updateGoldText();
+  }
+
+  private totalPendingAllOffices(): number {
+    return PART_SLOTS.reduce((sum, slot) => {
+      const office = this.save.offices[slot];
+      return sum + RARITIES.reduce((s, r) => s + office.pending[r], 0);
+    }, 0);
+  }
+
+  /** "Coletar tudo" (pedido do PO): coleta a produção pendente dos 7 escritórios de uma vez, sem precisar entrar linha por linha. */
+  private buildCollectAllButton(): void {
+    this.refreshCollectAllButton();
+  }
+
+  private refreshCollectAllButton(): void {
+    this.collectAllBtn?.destroy();
+    const total = this.totalPendingAllOffices();
+    const y = 96, h = 30;
+    this.collectAllBtn = this.makeButton(
+      16, y, CANVAS_WIDTH - 32, h,
+      total > 0 ? `Coletar tudo (${total} peças prontas)` : 'Coletar tudo (nada pronto ainda)',
+      0x2ecc71, total > 0, () => {
+        const { save } = collectAllOfficeParts(this.save);
+        this.save = save;
+        PART_SLOTS.forEach((slot, i) => this.refreshOfficeRow(slot, FIRST_ROW_Y + i * ROW_HEIGHT));
+        this.refreshCollectAllButton();
+      }
+    );
   }
 
   private buildBackButton(): void {
@@ -122,6 +155,7 @@ export class SedeScene extends Phaser.Scene {
       const { save } = collectOfficeParts(this.save, slot);
       this.save = save;
       this.refreshOfficeRow(slot, y);
+      this.refreshCollectAllButton();
     });
 
     const upgradeLabel = cost === null ? 'Nível MÁX' : `Upar (-${cost} Gold)`;

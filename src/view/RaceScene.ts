@@ -17,6 +17,7 @@ import {
   LARGADA_PREP_MS, LARGADA_LIGHT_INTERVAL_MS, LARGADA_HOLD_MIN_MS, LARGADA_HOLD_MAX_MS,
   LARGADA_HOLD_RATE, LARGADA_FALL_RATE, LARGADA_ZONE_SCALE,
   VISUAL_CATCHUP_HALFLIFE_MS, BULLET_TIME_SLOWDOWN, NORMAL_LEG_SPEED_T_PER_MS, LEG_PROGRESS_CAP,
+  EVENT_LOOKAHEAD_STEPS,
 } from './viewConstants.js';
 import { track as trackEvent } from '../telemetry/analytics.js';
 import { juice } from './juice.js';
@@ -41,19 +42,6 @@ function pathIndexForEvent(ev: RaceEvent): number {
     if (corner) return ev.kind === 'saida' ? corner.pathIndex + 0.5 : corner.pathIndex;
   }
   return 0; // largada
-}
-
-/**
- * Nitro ganha um nome contextual por tipo de evento (pedido do PO, sessão 9):
- * "KERS" na aceleração (saída) — alusão ao sistema de recuperação de energia
- * da F1 de 2012; "Magic" na frenagem/pit — alusão ao "magic button" de Lewis
- * Hamilton em Bahrein 2012 (McLaren; o pedido citou "Mercedes", mas o
- * episódio real foi antes da troca de equipe — mantido o nome pedido mesmo
- * assim, é a referência que o PO quis). Só o rótulo muda; `nitro`/`pendingNitro`
- * continuam os mesmos internamente.
- */
-function nitroLabel(ev: RaceEvent): string {
-  return ev.kind === 'saida' ? 'KERS' : 'Magic';
 }
 
 function formatGap(gap: number): string {
@@ -95,6 +83,8 @@ export class RaceScene extends Phaser.Scene {
   private teammate?: TeammateProfile;
 
   private trackGraphics!: Phaser.GameObjects.Graphics;
+  private startFinishLabel?: Phaser.GameObjects.Text;
+  private pitLabel?: Phaser.GameObjects.Text;
   private icons = new Map<string, IconEntry>();
   private panel!: Phaser.GameObjects.Container;
 
@@ -316,9 +306,38 @@ export class RaceScene extends Phaser.Scene {
       g.fillStyle(0x444444, 1);
       g.fillCircle(s.x, s.y, 4);
     }
+
+    // Largada/chegada (sessão 15, feedback do PO: "a linha de partida/chegada
+    // parece estar no local errado" — investigado; não havia NENHUM marcador
+    // pra ela, só o círculo azul do pit, que fica geometricamente bem perto
+    // de `path[0]` em Spa — fácil confundir os dois sem um marcador próprio).
+    // Xadrez 2x2 em `path[0]`, visualmente distinto do círculo azul do pit e
+    // dos pontos cinza das curvas.
+    const cs = 5;
+    g.fillStyle(0xffffff, 1);
+    g.fillRect(s0.x - cs, s0.y - cs, cs, cs);
+    g.fillRect(s0.x, s0.y, cs, cs);
+    g.fillStyle(0x000000, 1);
+    g.fillRect(s0.x, s0.y - cs, cs, cs);
+    g.fillRect(s0.x - cs, s0.y, cs, cs);
+    g.lineStyle(1, 0xffffff, 0.9);
+    g.strokeRect(s0.x - cs, s0.y - cs, cs * 2, cs * 2);
+
     const pit = normalizedToScreen(track.path[track.pitPathIndex], TRACK_RECT);
     g.fillStyle(0x2196f3, 1);
     g.fillCircle(pit.x, pit.y, 6);
+
+    // Rótulos (fora do Graphics — precisam ser destruídos/recriados à parte
+    // a cada `drawTrack()`, senão vazam entre corridas igual ao bug já
+    // corrigido de `hudLeaderboardTexts`, ver seção 2.34 do Claude-Racing.md).
+    this.startFinishLabel?.destroy();
+    this.startFinishLabel = this.add.text(s0.x, s0.y - 14, 'LARGADA/CHEGADA', {
+      fontSize: '8px', color: '#ffffff',
+    }).setOrigin(0.5);
+    this.pitLabel?.destroy();
+    this.pitLabel = this.add.text(pit.x, pit.y + 12, 'PIT', {
+      fontSize: '8px', color: '#64b5f6',
+    }).setOrigin(0.5);
   }
 
   /**
@@ -390,7 +409,9 @@ export class RaceScene extends Phaser.Scene {
       return this.visualPlayerT;
     }
 
-    const nextEvent = s.events[s.eventIndex + 1] ?? currentEvent(s);
+    // Mira alguns eventos à frente, não só o próximo — ver EVENT_LOOKAHEAD_STEPS.
+    const lookaheadIndex = Math.min(s.eventIndex + EVENT_LOOKAHEAD_STEPS, s.events.length - 1);
+    const nextEvent = s.events[lookaheadIndex] ?? currentEvent(s);
     const nextT = pathIndexToT(pathIndexForEvent(nextEvent), track.path.length);
     const legDist = Math.max(0, shortestDeltaT(curT, nextT));
 
@@ -540,23 +561,30 @@ export class RaceScene extends Phaser.Scene {
   /**
    * Toggles persistentes de ultrapassagem/nitro (sessão 15, pedido do PO):
    * "deixá-los como toggle-buttons na tela, disponíveis para serem alterados
-   * todo o tempo, mas só seriam ativados se possível". Ficam numa linha
-   * dedicada no HUD (`HUD_HEIGHT` cresceu 78→108 só pra abrir esse espaço),
-   * sempre visíveis durante a corrida — ao contrário das antigas telas de
-   * decisão (showOvertakeStep/showNitroStep, removidas), não bloqueiam nada
-   * nem têm timeout: o jogador liga/desliga quando quiser, e a intenção só
-   * "pega" de verdade quando `showPreChallenge` checa a condição real
-   * (posição/gap pra ultrapassagem, carga disponível pro nitro).
+   * todo o tempo, mas só seriam ativados se possível". Sempre visíveis
+   * durante a corrida — ao contrário das antigas telas de decisão
+   * (showOvertakeStep/showNitroStep, removidas), não bloqueiam nada nem têm
+   * timeout: o jogador liga/desliga quando quiser, e a intenção só "pega" de
+   * verdade quando `showPreChallenge` checa a condição real (posição/gap pra
+   * ultrapassagem, carga disponível pro nitro).
+   *
+   * Reposicionados na 3ª rodada de feedback (mesma sessão): ficavam no topo
+   * do HUD; PO pediu aparência parecida com o painel de gaps (esquerda,
+   * `buildLeaderboardPanel` — fundo preto semi-transparente, monoespaçado) e
+   * mais perto do botão do desafio (que fica dentro de `this.panel`, no
+   * rodapé) — movidos pra uma faixa fixa logo ACIMA de `this.panel` (fora
+   * dele, pra sobreviver a `clearPanel()`), com o mesmo estilo visual do
+   * painel de gaps em vez do preenchimento sólido colorido de antes.
    */
   private buildToggleButtons(): void {
-    const y = 82, h = 24, gap = 8;
+    const y = PANEL_Y - 34, h = 28, gap = 8;
     const w = (CANVAS_WIDTH - 32 - gap) / 2;
     const container = this.add.container(0, 0).setDepth(900);
 
-    const overtakeBg = this.add.rectangle(16, y, w, h, 0x455a64, 1).setOrigin(0, 0)
-      .setStrokeStyle(1, 0x66757f).setInteractive({ useHandCursor: true });
+    const overtakeBg = this.add.rectangle(16, y, w, h, 0x000000, 0.55).setOrigin(0, 0)
+      .setStrokeStyle(1, 0x556677).setInteractive({ useHandCursor: true });
     const overtakeText = this.add.text(16 + w / 2, y + h / 2, 'ULTRAPASSAGEM', {
-      fontSize: '11px', color: '#ffffff', fontStyle: 'bold',
+      fontSize: '11px', color: '#cccccc', fontFamily: 'monospace', fontStyle: 'bold',
     }).setOrigin(0.5);
     overtakeBg.on('pointerdown', () => {
       juice.click();
@@ -565,10 +593,10 @@ export class RaceScene extends Phaser.Scene {
     });
 
     const nitroX = 16 + w + gap;
-    const nitroBg = this.add.rectangle(nitroX, y, w, h, 0x455a64, 1).setOrigin(0, 0)
-      .setStrokeStyle(1, 0x66757f).setInteractive({ useHandCursor: true });
+    const nitroBg = this.add.rectangle(nitroX, y, w, h, 0x000000, 0.55).setOrigin(0, 0)
+      .setStrokeStyle(1, 0x556677).setInteractive({ useHandCursor: true });
     const nitroText = this.add.text(nitroX + w / 2, y + h / 2, 'NITRO', {
-      fontSize: '11px', color: '#ffffff', fontStyle: 'bold',
+      fontSize: '11px', color: '#cccccc', fontFamily: 'monospace', fontStyle: 'bold',
     }).setOrigin(0.5);
     nitroBg.on('pointerdown', () => {
       juice.click();
@@ -602,24 +630,31 @@ export class RaceScene extends Phaser.Scene {
     const hasNitroNow = s.nitro > 0;
 
     this.styleToggle(this.overtakeToggleBg, this.overtakeToggleText!, this.overtakeToggleOn, canOvertakeNow, 'ULTRAPASSAGEM');
-    const nitroLabelText = ev ? nitroLabel(ev).toUpperCase() : 'NITRO';
-    this.styleToggle(this.nitroToggleBg, this.nitroToggleText!, this.nitroToggleOn, hasNitroNow, nitroLabelText);
+    // Sempre "NITRO" (feedback do PO, 3ª rodada): o rótulo contextual
+    // KERS/Magic (sessão 9) fazia sentido numa tela de decisão que só
+    // aparecia 1x por evento — num toggle PERSISTENTE, visível o tempo
+    // todo através de vários tipos de evento, o rótulo trocando sozinho
+    // parecia sugerir 2 mecanismos diferentes, quando é sempre o mesmo
+    // nitro (`state.nitro`/`tryUseNitro`), só usável tanto na saída quanto
+    // na frenagem/pit.
+    this.styleToggle(this.nitroToggleBg, this.nitroToggleText!, this.nitroToggleOn, hasNitroNow, 'NITRO');
   }
 
+  /** Visual "painel de gaps" (fundo escuro semi-transparente, monoespaçado) — cor do texto/borda indica o estado, não mais um preenchimento sólido colorido. */
   private styleToggle(
     bg: Phaser.GameObjects.Rectangle, text: Phaser.GameObjects.Text, on: boolean, available: boolean, label: string
   ): void {
     text.setText(on ? `${label}: ON` : label);
     if (on && available) {
-      bg.setFillStyle(0xff8a65);
-      text.setColor('#111111');
+      bg.setStrokeStyle(1, 0x81c784);
+      text.setColor('#81c784');
     } else if (on) {
       // ligado mas não disponível agora (ex.: sem nitro, ou longe demais pra ultrapassar) — "armado", esperando a condição.
-      bg.setFillStyle(0x6b4a3f);
-      text.setColor('#ddc2b8');
+      bg.setStrokeStyle(1, 0xd4a574);
+      text.setColor('#d4a574');
     } else {
-      bg.setFillStyle(0x455a64);
-      text.setColor('#ffffff');
+      bg.setStrokeStyle(1, 0x556677);
+      text.setColor('#cccccc');
     }
   }
 
