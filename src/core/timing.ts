@@ -1,6 +1,6 @@
 import type { Tier } from './types.js';
 import {
-  ZONE_BASE_HALVES, MAX_SCALE, OVERTAKE_GAP_THRESHOLD, PNEU_BOOST_SCALE, HEALTH_DIFFICULTY_FLOOR,
+  ZONE_BASE_HALVES, MAX_SCALE, OVERTAKE_GAP_THRESHOLD, PNEU_BOOST_SCALE, HEALTH_DIFFICULTY_FLOOR, PIT_SCALE,
 } from './constants.js';
 
 export interface ZoneHalves {
@@ -64,7 +64,10 @@ export interface ScaleOptions {
 export function computeScale(opts: ScaleOptions): number {
   let scale = opts.base;
   if (opts.isPit) {
-    scale *= 1.3 + (opts.pitCrewQuality ?? 0) * 0.3; // equipe melhor = zona ainda mais larga
+    // PIT_SCALE existia declarada mas nunca referenciada aqui (débito técnico
+    // achado na auditoria da sessão 13) — o valor 1.3 estava duplicado como
+    // número mágico. Corrigido pra usar a constante de verdade.
+    scale *= PIT_SCALE + (opts.pitCrewQuality ?? 0) * 0.3; // equipe melhor = zona ainda mais larga
   }
   if (!opts.isSaida && !opts.isPit && opts.overtakeAttempt) {
     const closeness = Math.min(1, Math.abs(opts.gap) / OVERTAKE_GAP_THRESHOLD);
