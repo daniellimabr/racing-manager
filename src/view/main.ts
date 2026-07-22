@@ -4,6 +4,7 @@ import { RaceScene } from './RaceScene.js';
 import { HubScene } from './HubScene.js';
 import { OficinaScene } from './OficinaScene.js';
 import { TutorialScene } from './TutorialScene.js';
+import { SedeScene } from './SedeScene.js';
 import { CANVAS_WIDTH, CANVAS_HEIGHT } from './viewConstants.js';
 import { initPostHogFromEnv, track } from '../telemetry/analytics.js';
 
@@ -35,5 +36,7 @@ new Phaser.Game({
   // OficinaScene (E-207) é acessível a partir do Hub (botão "OFICINA").
   // TutorialScene (sessão 12): Hub redireciona pra cá na 1ª vez (save novo);
   // também acessível a qualquer momento via botão "Como jogar" no Hub.
-  scene: [HubScene, RaceScene, OficinaScene, TutorialScene],
+  // SedeScene (E-301, sessão 13): escritórios de produção passiva, acessível
+  // via botão "SEDE" no Hub.
+  scene: [HubScene, RaceScene, OficinaScene, TutorialScene, SedeScene],
 });

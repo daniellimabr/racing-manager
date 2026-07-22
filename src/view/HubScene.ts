@@ -52,6 +52,7 @@ export class HubScene extends Phaser.Scene {
     this.buildCars();
     this.buildTutorialButton();
     this.buildOficinaButton();
+    this.buildSedeButton();
     this.buildEnergyPanel();
     this.buildGoldPanel();
     this.buildPartsSummary();
@@ -112,6 +113,19 @@ export class HubScene extends Phaser.Scene {
     bg.on('pointerdown', () => {
       juice.click();
       this.scene.start('OficinaScene');
+    });
+  }
+
+  /** Leva à Sede do time (E-301, CLAUDE.md §5 tela 5) — escritórios de produção passiva. */
+  private buildSedeButton(): void {
+    const bg = this.add.rectangle(CANVAS_WIDTH - 100, 46, 84, 28, 0x2a2e34)
+      .setOrigin(0, 0).setStrokeStyle(1, 0x444a52).setInteractive({ useHandCursor: true });
+    this.add.text(CANVAS_WIDTH - 58, 60, 'SEDE', {
+      fontSize: '11px', color: '#ffffff', fontStyle: 'bold',
+    }).setOrigin(0.5);
+    bg.on('pointerdown', () => {
+      juice.click();
+      this.scene.start('SedeScene');
     });
   }
 

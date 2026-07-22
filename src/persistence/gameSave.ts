@@ -9,6 +9,10 @@ import {
   ENERGY_MAX, applyEnergyRegen, emptyInventory, receivePart, fuseAll, cloneInventory, setEquipped, PART_SLOTS,
   type PartInventory, type PartDrop, type FusionResult, type RaceRewardResult, type PartSlot, type Rarity,
 } from '../core/economy.js';
+import {
+  createOffices, applyOfficesProduction, collectOffice, upgradeOffice,
+  type OfficesState,
+} from '../core/offices.js';
 
 const SAVE_KEY = 'save-v1';
 
@@ -21,29 +25,51 @@ const SAVE_KEY = 'save-v1';
  * existir. Saves migrados de v1/v2 (jogador que já tem progresso) entram como
  * `true` — não faz sentido interromper quem já conhece o jogo com o tutorial
  * na próxima vez que abrir. Só saves NOVOS (`defaultSave()`) começam `false`.
+ *
+ * v4 (sessão 13, Sede/escritórios — E-301): `offices` passou a existir (ver
+ * `core/offices.ts`). Saves migrados de v1/v2/v3 ganham escritórios NOVOS
+ * (nível 1, sem produção pendente) — não tem como "reconstruir" um histórico
+ * de produção que nunca existiu, então começar do zero é o único
+ * comportamento que faz sentido aqui (diferente de `hasSeenTutorial`, onde
+ * dava pra inferir "já viu" a partir de progresso existente).
+ *
  * Ver `migrateSave` para como saves antigos são tratados sem perder progresso
  * nem mudar de comportamento.
  */
-const CURRENT_VERSION = 3;
+const CURRENT_VERSION = 4;
 
 export interface GameSave {
-  version: 3;
+  version: 4;
   gold: number;
   energy: number;
   energyLastUpdateMs: number;
   inventory: PartInventory;
   /** true depois que o jogador viu (ou pulou) a TutorialScene ao menos 1 vez. */
   hasSeenTutorial: boolean;
+  /** Sede do time (E-301) — produção passiva de peças por escritório. */
+  offices: OfficesState;
 }
 
-function defaultSave(): GameSave {
+/**
+ * `nowMs` explícito (não `Date.now()` interno): achado real na sessão 13 —
+ * `energyLastUpdateMs` "funcionava" mesmo com `Date.now()` hardcoded aqui
+ * porque `applyEnergyRegen` resincroniza o relógio pro `nowMs` de verdade
+ * sempre que a energia já está no teto (que é o caso de um save novo). Os
+ * escritórios não têm esse mesmo atalho (começam com 0 pendente, não "no
+ * teto"), então usar `Date.now()` aqui fazia `applyOfficesProduction` comparar
+ * contra um timestamp de parede real vs. o `nowMs` sintético dos testes —
+ * `elapsedMs` dava sempre negativo (viravam 0 pelo `Math.max`), produção
+ * nunca avançava. Corrigido usando o mesmo `nowMs` em tudo.
+ */
+function defaultSave(nowMs: number): GameSave {
   return {
     version: CURRENT_VERSION,
     gold: 0,
     energy: ENERGY_MAX,
-    energyLastUpdateMs: Date.now(),
+    energyLastUpdateMs: nowMs,
     inventory: emptyInventory(),
     hasSeenTutorial: false,
+    offices: createOffices(nowMs),
   };
 }
 
@@ -59,13 +85,15 @@ function defaultSave(): GameSave {
  * vez na Oficina. Qualquer coisa irreconhecível (corrompida, versão futura
  * desconhecida) reseta para um save novo — mesma proteção simples de antes.
  */
-function migrateSave(raw: unknown): GameSave {
-  if (!raw || typeof raw !== 'object') return defaultSave();
+function migrateSave(raw: unknown, nowMs: number): GameSave {
+  if (!raw || typeof raw !== 'object') return defaultSave(nowMs);
   const r = raw as {
     version?: unknown; gold?: unknown; energy?: unknown; energyLastUpdateMs?: unknown; hasSeenTutorial?: unknown;
+    offices?: unknown;
     inventory?: { counts?: PartInventory['counts']; equipped?: Partial<Record<PartSlot, Rarity | null>> };
   };
-  if ((r.version !== 1 && r.version !== 2 && r.version !== CURRENT_VERSION) || !r.inventory?.counts) return defaultSave();
+  const knownVersion = r.version === 1 || r.version === 2 || r.version === 3 || r.version === CURRENT_VERSION;
+  if (!knownVersion || !r.inventory?.counts) return defaultSave(nowMs);
 
   const equipped = { ...(r.inventory.equipped ?? {}) } as Record<PartSlot, Rarity | null>;
   for (const slot of PART_SLOTS) {
@@ -74,13 +102,17 @@ function migrateSave(raw: unknown): GameSave {
   // saves v1/v2 (sem hasSeenTutorial) são de jogador com progresso existente —
   // tratado como "já viu" o tutorial, pra não interromper quem já conhece o jogo.
   const hasSeenTutorial = typeof r.hasSeenTutorial === 'boolean' ? r.hasSeenTutorial : true;
+  // saves v1/v2/v3 (sem offices) ganham escritórios novos — não tem histórico
+  // de produção pra reconstruir, ver nota de versão acima.
+  const offices = (r.offices && typeof r.offices === 'object') ? (r.offices as OfficesState) : createOffices(nowMs);
   return {
     version: CURRENT_VERSION,
     gold: typeof r.gold === 'number' ? r.gold : 0,
     energy: typeof r.energy === 'number' ? r.energy : ENERGY_MAX,
-    energyLastUpdateMs: typeof r.energyLastUpdateMs === 'number' ? r.energyLastUpdateMs : Date.now(),
+    energyLastUpdateMs: typeof r.energyLastUpdateMs === 'number' ? r.energyLastUpdateMs : nowMs,
     inventory: { counts: r.inventory.counts, equipped },
     hasSeenTutorial,
+    offices,
   };
 }
 
@@ -91,9 +123,10 @@ function migrateSave(raw: unknown): GameSave {
  */
 export function loadGame(nowMs: number = Date.now()): GameSave {
   const raw = loadJSON<unknown>(SAVE_KEY, null);
-  const save: GameSave = raw === null ? defaultSave() : migrateSave(raw);
+  const save: GameSave = raw === null ? defaultSave(nowMs) : migrateSave(raw, nowMs);
   const regen = applyEnergyRegen(save, nowMs);
-  const updated: GameSave = { ...save, energy: regen.energy, energyLastUpdateMs: regen.energyLastUpdateMs };
+  const offices = applyOfficesProduction(save.offices, nowMs);
+  const updated: GameSave = { ...save, energy: regen.energy, energyLastUpdateMs: regen.energyLastUpdateMs, offices };
   saveJSON(SAVE_KEY, updated);
   return updated;
 }
@@ -133,6 +166,13 @@ export function applyRaceRewards(save: GameSave, reward: RaceRewardResult): Appl
   return { save: updated, fusions };
 }
 
+/** Marca o tutorial como visto/pulado (TutorialScene, sessão 12) — persistido pra não aparecer de novo sozinho. */
+export function markTutorialSeen(save: GameSave): GameSave {
+  const updated: GameSave = { ...save, hasSeenTutorial: true };
+  saveGame(updated);
+  return updated;
+}
+
 /**
  * Equipa manualmente uma raridade num slot (Oficina, E-207) — escolha
  * explícita do jogador (`core/economy.ts` `setEquipped`), persistida no save.
@@ -141,18 +181,40 @@ export function applyRaceRewards(save: GameSave, reward: RaceRewardResult): Appl
  * (defensivo — a `OficinaScene` só deveria oferecer raridades possuídas, então
  * isso não deveria acontecer na prática pela UI normal).
  */
-/** Marca o tutorial como visto/pulado (TutorialScene, sessão 12) — persistido pra não aparecer de novo sozinho. */
-export function markTutorialSeen(save: GameSave): GameSave {
-  const updated: GameSave = { ...save, hasSeenTutorial: true };
-  saveGame(updated);
-  return updated;
-}
-
 export function equipPart(save: GameSave, slot: PartSlot, rarity: Rarity): GameSave {
   const inventory = cloneInventory(save.inventory);
   const applied = setEquipped(inventory, slot, rarity);
   if (!applied) return save;
   const updated: GameSave = { ...save, inventory };
+  saveGame(updated);
+  return updated;
+}
+
+/**
+ * Coleta a produção pendente de 1 escritório (Sede, E-301) — soma as peças
+ * ao inventário (podem disparar fusão automática, igual às peças de corrida)
+ * e persiste. Retorna as fusões ocorridas pra exibir na tela, mesmo padrão
+ * de `applyRaceRewards`.
+ */
+export function collectOfficeParts(save: GameSave, slot: PartSlot): ApplyRewardsResult {
+  const { offices, collected } = collectOffice(save.offices, slot);
+  const inventory = cloneInventory(save.inventory);
+  for (const part of collected) receivePart(inventory, part.slot, part.rarity);
+  const fusions = fuseAll(inventory);
+  const updated: GameSave = { ...save, offices, inventory };
+  saveGame(updated);
+  return { save: updated, fusions };
+}
+
+/**
+ * Sobe 1 nível um escritório (Sede, E-301), debitando o custo em Gold. `null`
+ * = não aplicado (sem Gold suficiente ou escritório já no nível máximo) —
+ * mesmo padrão defensivo de `equipPart`.
+ */
+export function upgradeOfficeLevel(save: GameSave, slot: PartSlot): GameSave | null {
+  const result = upgradeOffice(save.offices, slot, save.gold);
+  if (!result) return null;
+  const updated: GameSave = { ...save, offices: result.offices, gold: save.gold - result.goldSpent };
   saveGame(updated);
   return updated;
 }

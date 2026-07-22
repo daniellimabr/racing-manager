@@ -1,7 +1,11 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { loadGame, saveGame, spendEnergyForRace, applyRaceRewards, equipPart, markTutorialSeen } from '../src/persistence/gameSave.js';
+import {
+  loadGame, saveGame, spendEnergyForRace, applyRaceRewards, equipPart, markTutorialSeen,
+  collectOfficeParts, upgradeOfficeLevel,
+} from '../src/persistence/gameSave.js';
 import { clear, saveJSON } from '../src/persistence/storage.js';
 import { ENERGY_MAX, ENERGY_COST_PER_RACE, ENERGY_REGEN_MINUTES_PER_POINT, equippedRarity } from '../src/core/economy.js';
+import { OFFICE_BASE_MINUTES_PER_PART, OFFICE_UPGRADE_BASE_COST } from '../src/core/offices.js';
 
 // Ambiente de teste (vitest) roda em Node — sem `localStorage`, o wrapper cai
 // no fallback em memória (ver storage.ts). `clear` entre testes evita um save
@@ -85,7 +89,7 @@ describe('gameSave (E-205)', () => {
       saveJSON('save-v1', v1Raw);
 
       const loaded = loadGame(500_000); // mesmo instante do save — sem regen no meio
-      expect(loaded.version).toBe(3);
+      expect(loaded.version).toBe(4);
       expect(loaded.gold).toBe(250);
       expect(loaded.energy).toBe(12);
       // sem escolha própria migrada (equipped ausente) → cai no mesmo fallback automático de sempre
@@ -97,7 +101,7 @@ describe('gameSave (E-205)', () => {
     it('save corrompido/desconhecido não quebra o load — reseta para um save novo', () => {
       saveJSON('save-v1', { lixo: true });
       const loaded = loadGame(0);
-      expect(loaded.version).toBe(3);
+      expect(loaded.version).toBe(4);
       expect(loaded.gold).toBe(0);
       expect(loaded.energy).toBe(ENERGY_MAX);
     });
@@ -133,7 +137,7 @@ describe('gameSave (E-205)', () => {
       };
       saveJSON('save-v1', v2Raw);
       const loaded = loadGame(0);
-      expect(loaded.version).toBe(3);
+      expect(loaded.version).toBe(4);
       expect(loaded.hasSeenTutorial).toBe(true);
     });
 
@@ -185,6 +189,92 @@ describe('gameSave (E-205)', () => {
       expect(save.inventory.counts.chassis.gray).toBe(0);
       // a escolha do jogador (gray) sumiu do inventário → fallback automático pra melhor restante (green)
       expect(equippedRarity(save.inventory, 'chassis')).toBe('green');
+    });
+  });
+
+  describe('Sede/escritórios (E-301, sessão 13)', () => {
+    it('save novo já vem com os 7 escritórios, nível 1', () => {
+      const save = loadGame(0);
+      expect(save.offices.motor.level).toBe(1);
+      expect(save.offices.livery.level).toBe(1);
+    });
+
+    it('save v1/v2/v3 (sem offices) migra com escritórios novos, sem quebrar', () => {
+      const v3Raw = {
+        version: 3,
+        gold: 500,
+        energy: 30,
+        energyLastUpdateMs: 0,
+        hasSeenTutorial: true,
+        inventory: {
+          counts: {
+            motor: { gray: 0, green: 0, blue: 0, purple: 0, gold: 0, red: 0 },
+            asaDianteira: { gray: 0, green: 0, blue: 0, purple: 0, gold: 0, red: 0 },
+            asaTraseira: { gray: 0, green: 0, blue: 0, purple: 0, gold: 0, red: 0 },
+            chassis: { gray: 0, green: 0, blue: 0, purple: 0, gold: 0, red: 0 },
+            suspensao: { gray: 0, green: 0, blue: 0, purple: 0, gold: 0, red: 0 },
+            pneu: { gray: 0, green: 0, blue: 0, purple: 0, gold: 0, red: 0 },
+            livery: { gray: 0, green: 0, blue: 0, purple: 0, gold: 0, red: 0 },
+          },
+          equipped: {
+            motor: null, asaDianteira: null, asaTraseira: null, chassis: null,
+            suspensao: null, pneu: null, livery: null,
+          },
+        },
+        // sem campo `offices` de propósito — save real de antes do E-301
+      };
+      saveJSON('save-v1', v3Raw);
+      const loaded = loadGame(0);
+      expect(loaded.version).toBe(4);
+      expect(loaded.gold).toBe(500); // progresso existente preservado
+      expect(loaded.offices.motor.level).toBe(1); // escritório novo, começa do zero
+    });
+
+    it('produção passiva acumula com o tempo e loadGame aplica antes de retornar', () => {
+      const save = loadGame(0);
+      const intervalMs = OFFICE_BASE_MINUTES_PER_PART * 60_000;
+      const reloaded = loadGame(intervalMs * 2);
+      const total = reloaded.offices.motor.pending.gray + reloaded.offices.motor.pending.green;
+      expect(total).toBe(2);
+      void save;
+    });
+
+    it('collectOfficeParts move a produção pendente pro inventário e persiste', () => {
+      const intervalMs = OFFICE_BASE_MINUTES_PER_PART * 60_000;
+      loadGame(0);
+      // só 2 intervalos de propósito: com 3+ peças da mesma raridade a fusão
+      // automática (mesmo comportamento de applyRaceRewards) entraria no meio
+      // e "3 gray -> 1 green" quebraria a comparação simples de total abaixo.
+      const withProduction = loadGame(intervalMs * 2);
+      const totalBefore = withProduction.offices.motor.pending.gray + withProduction.offices.motor.pending.green;
+      expect(totalBefore).toBeGreaterThan(0);
+
+      const { save: afterCollect } = collectOfficeParts(withProduction, 'motor');
+      const totalCollected = afterCollect.inventory.counts.motor.gray + afterCollect.inventory.counts.motor.green;
+      expect(totalCollected).toBe(totalBefore);
+      expect(afterCollect.offices.motor.pending.gray).toBe(0);
+
+      const reloaded = loadGame(intervalMs * 2); // mesmo instante — sem produção nova no meio
+      expect(reloaded.inventory.counts.motor.gray + reloaded.inventory.counts.motor.green).toBe(totalCollected);
+    });
+
+    it('upgradeOfficeLevel debita o Gold certo e sobe o nível, persistindo', () => {
+      let save = loadGame(0);
+      save = applyRaceRewards(save, { gold: 1000, partsDropped: [] }).save;
+
+      const upgraded = upgradeOfficeLevel(save, 'motor');
+      expect(upgraded).not.toBeNull();
+      expect(upgraded!.offices.motor.level).toBe(2);
+      expect(upgraded!.gold).toBe(1000 - OFFICE_UPGRADE_BASE_COST);
+
+      const reloaded = loadGame(0);
+      expect(reloaded.offices.motor.level).toBe(2); // persistiu
+    });
+
+    it('upgradeOfficeLevel retorna null sem Gold suficiente, sem persistir nada', () => {
+      const save = loadGame(0); // 0 Gold
+      const result = upgradeOfficeLevel(save, 'motor');
+      expect(result).toBeNull();
     });
   });
 });
