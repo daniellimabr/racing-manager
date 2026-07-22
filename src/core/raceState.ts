@@ -283,8 +283,18 @@ export function revive(state: RaceState): boolean {
  */
 export function toRaceOutput(state: RaceState): RaceOutput {
   const lastPlace = state.grid.cars.length + 1; // 11 IAs + o jogador = 12 (ver core/grid.ts)
+  // `state.position` é só um cache, atualizado a última vez dentro do
+  // `resolveCurrent()` do ÚLTIMO evento — ANTES do `advanceGrid()` que o
+  // `advance()` seguinte roda pra fechar a corrida (avança as 11 IAs mais 1x
+  // depois que o jogador já terminou). Usar o cache aqui podia reportar uma
+  // posição 1 tick de grid desatualizada (achado como teste flaky em CI,
+  // causa raiz corrigida em vez de só re-rodar/seedar o teste — mesmo
+  // princípio já registrado neste projeto de unificar a fonte de verdade em
+  // vez de manter 2 valores quase-iguais). Recalcula ao vivo aqui, na hora
+  // de montar o resultado final.
+  const livePosition = derivePlayerStanding(state).position;
   return {
-    position: state.dnf ? lastPlace : state.position,
+    position: state.dnf ? lastPlace : livePosition,
     dnf: state.dnf,
     dnfReason: state.dnfReason,
     reviveUsed: state.usedRevive,
