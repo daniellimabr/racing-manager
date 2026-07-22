@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createRace, currentEvent, resolveCurrent, advance, revive, tryUseNitro, toRaceOutput, applyBoost } from '../src/core/raceState.js';
+import { createRace, currentEvent, resolveCurrent, advance, revive, tryUseNitro, toRaceOutput, applyBoost, raceStandings } from '../src/core/raceState.js';
 import {
   REPAIR_BOOST_AMOUNT, DAMAGE, GAIN, GOLD_CRASH_PENALTY, PLAYER_GRID_PACE_SCALE,
   MISS_INSTANT_DNF_CHANCE_MIN, MISS_INSTANT_DNF_CHANCE_MAX, NOMINAL_LAP_SECONDS,
@@ -190,6 +190,39 @@ describe('saída aplica metade do dano, sem arredondar (regressão da sessão 9,
     const r = resolveCurrent(s, 'green', { nitroUsed: false });
     expect(r.damage).toBeCloseTo(DAMAGE.green / 2, 5);
     expect(s.health).toBeCloseTo(before - DAMAGE.green / 2, 5);
+  });
+});
+
+describe('classificação de DNF + staleness de position (sessão 13, bug reportado pelo PO)', () => {
+  it('state.position fica sempre atualizado, mesmo em eventos de saída', () => {
+    const s = createRace(track, setup);
+    expect(currentEvent(s).kind).toBe('saida'); // largada
+    resolveCurrent(s, 'purple', { nitroUsed: false });
+    const live = raceStandings(s).find((x) => x.isPlayer)!.position;
+    expect(s.position).toBe(live); // antes do fix, ficava travado no valor de antes de resolver
+  });
+
+  it('RaceOutput.position força último lugar quando a corrida termina em DNF', () => {
+    const s = createRace(track, setup); // saúde cheia
+    advance(s);
+    resolveCurrent(s, 'miss', { nitroUsed: false, rng: () => 0 }); // DNF instantâneo garantido
+    expect(s.dnf).toBe(true);
+    const output = toRaceOutput(s);
+    expect(output.position).toBe(12); // 11 IAs + o jogador
+  });
+
+  it('RaceOutput.position usa a posição real (não força nada) quando a corrida termina normalmente', () => {
+    const s = createRace(track, setup);
+    let guard = 0;
+    while (!s.finished && !s.dnf && guard < 1000) {
+      resolveCurrent(s, 'purple', { nitroUsed: false });
+      advance(s);
+      guard++;
+    }
+    const output = toRaceOutput(s);
+    const live = raceStandings(s).find((x) => x.isPlayer)!.position;
+    expect(output.dnf).toBe(false);
+    expect(output.position).toBe(live);
   });
 });
 

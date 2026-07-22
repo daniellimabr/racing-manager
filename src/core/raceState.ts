@@ -151,15 +151,25 @@ export function resolveCurrent(state: RaceState, tier: Tier, opts: ResolveOption
   // início da volta atual — fechado em `advance()` quando a volta muda.
   state.currentLapGain += gain;
 
+  // Bug real encontrado na sessão 13 (Claude-Racing.md §3): `state.position`
+  // só era atualizado em eventos não-saída — como toda corrida que termina
+  // naturalmente termina numa saída (última curva da última volta), o campo
+  // ficava sempre 1 evento desatualizado no fim de qualquer corrida (usado
+  // por `tools/botHarness.ts` pra calcular posição média/vitórias/pódio).
+  // Agora `state.position` é sempre recalculado; só a DETECÇÃO de
+  // ultrapassagem (`positionChanged`, usada pra mensagem "ultrapassou!" e
+  // telemetria) continua restrita a eventos não-saída — ultrapassagem só
+  // acontece organicamente na frenagem/pit (CLAUDE.md), não faz sentido
+  // reportar "ultrapassou" no meio de uma saída.
+  const newPosition = derivePlayerStanding(state).position;
   let positionChanged: 'gained' | 'lost' | null = null;
   if (!isSaida) {
-    const newPosition = derivePlayerStanding(state).position;
     if (newPosition < state.position) positionChanged = 'gained';
     else if (newPosition > state.position) positionChanged = 'lost';
-    state.position = newPosition;
     state.pendingBoost = null;
     state.overtakeAttempt = false;
   }
+  state.position = newPosition;
   state.gapToAhead = computeGapToAhead(state);
 
   const message = `${gain >= 0 ? 'ganhou' : 'perdeu'} ${Math.abs(gain).toFixed(2)}s`;
@@ -232,9 +242,20 @@ export function revive(state: RaceState): boolean {
   return true;
 }
 
+/**
+ * Classificação de DNF (sessão 13, bug reportado pelo PO): a corrida não tem
+ * como "deixar o resto do grid terminar sozinho" quando o jogador desiste
+ * (a simulação dos 11 carros de IA só avança em lockstep com os eventos do
+ * jogador — ver `advance()`), então usar a posição "ao vivo" congelada no
+ * instante do abandono podia mostrar coisas sem sentido, tipo P1 pra quem
+ * bateu e não terminou. Regra adotada: DNF sempre classifica em último lugar
+ * — mais simples que simular o resto da corrida pras IAs, e alinhado com a
+ * convenção real de corrida (não terminar é sempre pior que terminar).
+ */
 export function toRaceOutput(state: RaceState): RaceOutput {
+  const lastPlace = state.grid.cars.length + 1; // 11 IAs + o jogador = 12 (ver core/grid.ts)
   return {
-    position: state.position,
+    position: state.dnf ? lastPlace : state.position,
     dnf: state.dnf,
     dnfReason: state.dnfReason,
     reviveUsed: state.usedRevive,

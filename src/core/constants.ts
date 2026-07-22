@@ -87,15 +87,23 @@ export const GOLD_CRASH_PENALTY = 50;
  * Piso do multiplicador de dificuldade por saúde (`computeScale`, core/timing.ts).
  * Pedido do PO (sessão 9): carro mais danificado fica mais difícil de guiar —
  * a zona de acerto nunca fica menor que este piso, mesmo com saúde zerada
- * (pra não virar literalmente impossível). Valor inicial não confirmado pelo
- * PO, a validar em playtest.
+ * (pra não virar literalmente impossível).
  *
- * **Ainda não confirmado pelo PO na sessão 10** (Claude-Racing.md §2.27) —
- * deliberadamente não mexido nesta sessão: afeta dificuldade física de acerto
- * humano, não sorteio de probabilidade, então o harness de bots não consegue
- * validar se 0.6 está certo. Fica igual até o PO confirmar em playtest.
+ * **Testado pelo PO na sessão 13, com o piso em 0.6:** "errei bastante, mas
+ * acertando amarelo/vermelho pra não bater. Mesmo com 50 de saúde [de 219 —
+ * ~23% da saúde máxima], a dificuldade do roxo não aumentou, nem de perto."
+ * Ou seja, 0.6 era generoso demais pra ser perceptível — a essa altura da
+ * saúde (`healthFactor = 0.6 + 0.4*0.23 ≈ 0.69`) a zona só encolhia ~31%,
+ * pouco pra sentir em cima de uma zona já apertada. **Pedido explícito do PO:
+ * "pode pegar pesado, pra eu validar o limite"** — reduzido de propósito pra
+ * um valor exagerado (não é a calibração final, é uma sondagem de limite).
+ * 0.6 → **0.2**: com 23% de saúde, `healthFactor ≈ 0.2 + 0.8*0.23 ≈ 0.38` —
+ * zona encolhe pra ~38% do normal, bem mais perceptível. Com saúde bem baixa
+ * (perto de 0), a zona chega a só 20% do tamanho normal. Esperado que isso
+ * fique "difícil demais" de propósito — o objetivo desta rodada é achar onde
+ * dói, pra sessão seguinte poder recuar pro ponto certo.
  */
-export const HEALTH_DIFFICULTY_FLOOR = 0.6;
+export const HEALTH_DIFFICULTY_FLOOR = 0.2;
 
 /**
  * Fator de escala aplicado ao `raceProgress` do jogador ao entrar no grid como
@@ -148,16 +156,18 @@ export const MAX_SCALE = 1.5;
 
 /**
  * Meias-larguras base (0-50) de cada zona de precisão. `purple` reduzido de
- * 8 → 6 na sessão 10 (Claude-Racing.md §2.27, ~25% mais estreita) — resposta
- * direta ao playtest do PO ("acertar o roxo não é um grande desafio", sessão
- * 8, §2.21), reconfirmado pelo harness (DNF ~0% com a tabela DAMAGE antiga).
- * **Isto NÃO é validado pelo harness de bots** — os bots simulam o resultado
- * de cada tier por sorteio de probabilidade fixa por perfil, não a
- * dificuldade física de acertar a zona (isso depende de reflexo humano real).
- * Só um playtest humano pode confirmar se 6 é o valor certo, ou se ainda
- * precisa cair mais / passou do ponto. Ver pergunta 1 pro PO em Claude-Racing.md §2.27.
+ * 8 → 6 na sessão 10 (~25% mais estreita) — resposta ao playtest do PO
+ * ("acertar o roxo não é um grande desafio", sessão 8). **Testado de novo na
+ * sessão 13: "ainda está fácil. Tô vencendo tudo com facilidade [...] hoje tá
+ * fácil sem boost."** 6 não foi suficiente. Pedido explícito do PO: "pode
+ * pegar pesado, pra eu validar o limite" — reduzido de propósito pra um valor
+ * agressivo (6 → **3**, metade), não é a calibração final. **Isto continua
+ * NÃO validado pelo harness de bots** — os bots simulam o resultado de cada
+ * tier por sorteio de probabilidade fixa por perfil, não a dificuldade física
+ * de acertar a zona (depende de reflexo humano real). Objetivo desta rodada é
+ * sondar o limite superior de dificuldade, não acertar de primeira.
  */
-export const ZONE_BASE_HALVES = { purple: 6, green: 20, amber: 35 };
+export const ZONE_BASE_HALVES = { purple: 3, green: 20, amber: 35 };
 
 /**
  * ~~POSITION_UNIT_SECONDS~~ — REMOVIDA na sessão 11 (unificação core/grid, ver

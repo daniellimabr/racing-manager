@@ -971,12 +971,10 @@ export class RaceScene extends Phaser.Scene {
     this.add.rectangle(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT, 0x0d0f12, 0.97).setOrigin(0, 0).setDepth(500);
     this.panel.setPosition(0, 0).setDepth(501);
 
-    const standings = this.currentStandings();
-    const playerStanding = standings.find((x) => x.isPlayer)!;
     const output = toRaceOutput(this.raceState);
     const lines = [
       'Corrida finalizada',
-      `Posição: ${playerStanding.position}/12`,
+      `Posição: ${output.position}/12`,
       `Voltas completadas: ${output.lapsCompleted}/${track.laps}`,
       output.dnf ? `DNF (${output.dnfReason})` : 'Chegou à bandeira quadriculada',
       output.reviveUsed ? 'Revive usado nesta corrida' : '',
@@ -1001,7 +999,7 @@ export class RaceScene extends Phaser.Scene {
       this.raceEnded = true;
       trackEvent('race_end', {
         trackId: track.id,
-        position: playerStanding.position,
+        position: output.position,
         durationSec: Math.round((Date.now() - this.raceStartTime) / 1000),
         lapsCompleted: output.lapsCompleted,
         dnf: output.dnf,
@@ -1010,13 +1008,11 @@ export class RaceScene extends Phaser.Scene {
         lapTimes: output.lapTimes,
       });
 
-      // `playerStanding.position` e `output.position` são agora garantidamente
-      // o mesmo número (unificação core/grid, sessão 11 — ver Claude-Racing.md
-      // §3/§6 item 5): `output.position` já É a posição derivada do grid, não
-      // mais um modelo escalar em paralelo. Mantido explícito via
-      // `playerStanding` aqui só por já estar em mãos (evita mais uma busca).
+      // `output.position` já reflete a regra de classificação de DNF (sessão
+      // 13, core/raceState.ts `toRaceOutput`) — último lugar quando o jogador
+      // não terminou, em vez da posição "ao vivo" congelada no abandono.
       const reward = computeRaceRewards({
-        position: playerStanding.position, dnf: output.dnf, goldPenalty: output.goldPenalty,
+        position: output.position, dnf: output.dnf, goldPenalty: output.goldPenalty,
       });
       const save = loadGame();
       // Pendência do Claude-Manager.md §2.8/§5 item 3: a fusão automática pode
