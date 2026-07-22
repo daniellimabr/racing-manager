@@ -2,9 +2,9 @@
 
 > Documento vivo mantido pelo agente TechLead-Manager (ver protocolo em Claude-Tech.md, seção 1.1).
 > Anexar junto com CLAUDE.md e Claude-Tech.md em conversas sobre a trilha Manager.
-> Última atualização: 2026-07-21 (sessão 3 — trabalho feito dentro de uma rodada da trilha Racing, a pedido direto do PO ["tela de instrução" + "avançar nos menus"], cross-referenciado aqui: `TutorialScene` nova (E-208, 3 páginas estáticas, opção A escolhida pelo PO entre 4 propostas), `GameSave` v3 (`hasSeenTutorial`, migração v1/v2→v3 trata saves existentes como "já viu"), e aviso na tela de resumo quando a fusão automática troca a peça que o jogador tinha equipado de propósito (fechava a pendência da seção 5 item 3 abaixo). Ver seção 2.9.)
+> Última atualização: 2026-07-21 (sessão 4 — trabalho feito dentro de uma rodada grande da trilha Racing, a pedido direto do PO ["listar tarefas do Manager também, atacar sem esperar interferência"], cross-referenciado aqui: **Sede do time (E-301) entregue** — 7 escritórios de produção passiva de peças (1 por tipo de peça; o de marketing ficou de fora de propósito, depende do sistema de patrocinadores da livery, ainda não desenhado), primeiro sink real de Gold do jogo. `GameSave` v4. Achado e corrigido um bug real no processo: `defaultSave()` usava `Date.now()` internamente em vez do `nowMs` recebido por `loadGame()` — mascarado até então porque a energia começa sempre no teto (que resincroniza o relógio na 1ª chamada), mas quebrava silenciosamente a produção dos escritórios (que começam vazios, sem esse atalho). Ver seção 2.10.)
 >
-> Última atualização anterior: 2026-07-21 (sessão 2 — Oficina de verdade (E-207): equipar peça virou escolha explícita do jogador, atendendo à rejeição do PO ao auto-equip como solução permanente (pergunta 5, seção 3, agora fechada). Ver seção 2.8 para o modelo de dados e a nova cena `OficinaScene`.)
+> Última atualização anterior: 2026-07-21 (sessão 3 — trabalho feito dentro de uma rodada da trilha Racing, a pedido direto do PO ["tela de instrução" + "avançar nos menus"], cross-referenciado aqui: `TutorialScene` nova (E-208, 3 páginas estáticas, opção A escolhida pelo PO entre 4 propostas), `GameSave` v3 (`hasSeenTutorial`, migração v1/v2→v3 trata saves existentes como "já viu"), e aviso na tela de resumo quando a fusão automática troca a peça que o jogador tinha equipado de propósito (fechava a pendência da seção 5 item 3 abaixo). Ver seção 2.9.)
 >
 > Sessão 1 (mesma data) — ativação da trilha Manager, Sprint 5/M2: E-201 a E-206 implementados de ponta a ponta numa rodada autônoma. Modelo de economia proposto do zero pelo TechLead-Manager, calibrado com um harness novo (`tools/economyHarness.ts`) em 2 rodadas de ajuste — a 1ª revelou que o modelo generoso demais deixava um jogador engajado (3x/dia) alcançar a raridade MÁXIMA de peça em só 21 dias; recalibrado pra isso levar meses. Hub/Garagem novo vira a tela inicial do jogo; corrida agora debita energia e paga Gold/peças reais ao final, tudo persistido em localStorage via wrapper próprio.
 
@@ -21,6 +21,7 @@
 | E-207 Oficina (equipar manual) | ✅ Feito (sessão 2, 2026-07-21) | Nova cena `OficinaScene`; PO rejeitou auto-equip como solução permanente (pergunta 5 fechada) — ver seção 2.8 |
 | E-208 Tutorial (TutorialScene) | ✅ Feito (sessão 3, 2026-07-21) | Opção A (estática, 3 páginas) escolhida pelo PO — ver seção 2.9 |
 | Aviso de fusão trocando peça equipada | ✅ Feito (sessão 3) | Fechava a pendência da seção 5 item 3 — ver seção 2.9 |
+| E-301 Sede/escritórios | ✅ Feito (sessão 4, 2026-07-21) | Adiantado do M3+ original. 7 escritórios (marketing fica de fora, depende do sistema de patrocinadores). Nova `SedeScene`, `GameSave` v4 — ver seção 2.10 |
 
 **Como rodar:** `npm install && npm test && npm run economy && npm run dev` (Hub é a tela inicial; botão OFICINA leva à nova tela de equipar; `npm run bots` continua sendo o harness da trilha Racing, não tocado aqui).
 
@@ -156,6 +157,24 @@ Contexto: o PO pediu uma tela de instrução (opção A entre 4 propostas — es
 
 **Verificação:** 98/98 testes, `tsc`/`build` limpos, `npm run economy` rodado de novo (números na mesma faixa de antes, nada quebrado). Smoke test Playwright headless confirmou visualmente: save novo cai direto na página 1/3 do tutorial; "Próximo" avança as 3 páginas; "Vamos correr!" volta pro Hub; botão "COMO JOGAR" reabre o tutorial; "Pular tutorial" também volta pro Hub — tudo sem erro de console. Não fechei uma corrida completa nesse smoke test pra ver o aviso de fusão na prática (exigiria uma sessão bem mais longa) — coberto só por leitura de código + os testes de `economy`/`gameSave`.
 
+### 2.10 Sede do time — escritórios de produção passiva (E-301, sessão 4, 2026-07-21)
+
+Feito dentro de uma rodada grande da trilha Racing (pedido do PO: "listar tarefas do Manager também, atacar sem esperar interferência"). Detalhe técnico completo no commit/código; resumo aqui:
+
+**Escopo — só 7 dos 8 escritórios do CLAUDE.md:** motor, asaDianteira, asaTraseira, chassis, suspensao, pneu, livery. O escritório de **marketing ficou de fora de propósito** — ele só faz sentido depois que o sistema de patrocinadores da livery existir (§5 item 6), e não valia construir metade de um sistema que depende do outro ainda não desenhado.
+
+**Modelo (`src/core/offices.ts`, módulo aditivo, mesmo espírito de `grid.ts`):** produção passiva estilo Archero/energia — cada escritório acumula peças com o tempo real até um teto (10), precisa ser coletado. Nível (1 a 5, upgradável com Gold, custo `150 × nível atual`) acelera a produção (`20 min / nível` por peça); a **raridade produzida é deliberadamente quase sempre `gray`** (12% de chance de `green`), mesma filosofia já calibrada pelo harness de economia pras recompensas de corrida (§2.6) — dar raridade alta direto de uma segunda fonte desalinharia a curva de fusão já calibrada.
+
+**Primeiro sink de Gold de verdade do jogo:** até aqui, Gold só acumulava (pergunta 4, §3, aprovada "deixar como está" pelo PO) — upar escritórios é a primeira coisa em que dá pra gastar.
+
+**`GameSave` v4:** novo campo `offices`. Saves v1/v2/v3 migram com escritórios NOVOS (nível 1, sem produção pendente) — não tem histórico de produção pra reconstruir, diferente de `hasSeenTutorial` (v3), onde dava pra inferir "já viu" a partir de progresso existente.
+
+**Bug real encontrado e corrigido no processo:** `defaultSave()` usava `Date.now()` internamente em vez do `nowMs` recebido por `loadGame()`. Isso "funcionava" pra energia só por acidente — `applyEnergyRegen` resincroniza o relógio pro `nowMs` de verdade sempre que a energia já está no teto (que é o caso de um save novo), mascarando o problema. Escritórios não têm esse atalho (começam com 0 pendente, não "no teto"), então `applyOfficesProduction` comparava um timestamp de parede real contra o `nowMs` sintético dos testes — `elapsedMs` dava sempre negativo (virava 0 pelo `Math.max`), produção nunca avançava. Corrigido threading `nowMs` por todo `defaultSave`/`migrateSave`. Achado pelos próprios testes automatizados falhando (não foi visual) — reforça o valor de testar a lógica de tempo decorrido com timestamps sintéticos, não só `Date.now()` real.
+
+**`SedeScene` nova (`src/view/SedeScene.ts`):** lista os 7 escritórios (nível, produção pendente por raridade, botões Coletar/Upar). Acessível via botão "SEDE" no Hub (abaixo do "OFICINA"). Greybox puro, sem arte, mesmo padrão do resto do jogo nesta fase.
+
+**Verificado:** testes novos em `tests/offices.test.ts` (módulo core isolado) e `tests/gameSave.test.ts` (persistência/migração/coleta/upgrade) — 120 no total do projeto depois desta sessão. `tsc`/`build` limpos. Smoke test Playwright headless: Hub → Sede → Hub navegando sem erro, os 7 escritórios renderizando corretamente (nível 1/5, "Nada pronto ainda", botões desabilitados corretamente com 0 Gold).
+
 ## 3. Questões em aberto — perguntas específicas pro PO
 
 **Feedback do PO testando o build (2026-07-21, registrado por uma sessão da trilha Racing que também tocou o Hub/Oficina nesta conversa — sinalizando aqui pro TechLead-Manager formalizar):** o inventário/equipamento hoje é um único pool global (`PartInventory` em `core/economy.ts`) — não existe o conceito de "peça equipada no Carro 1" vs. "peça equipada no Carro 2". O PO quer poder decidir em qual dos 2 carros instalar cada peça; remover de um carro devolveria a peça pro inventário geral, disponível pra equipar no outro. Isso é consistente com o Hub já mostrar 2 carros (`buildCars()`), mas hoje `computeZoneScale`/`equippedRarity` só existem numa dimensão (sem "por carro"). Não implementado — registrado como pendência real de design de dados (provavelmente `equipped` precisa virar `Record<CarId, Record<PartSlot, Rarity | null>>`, ou algo equivalente), fica pra próxima sessão da trilha Manager avaliar o esforço, especialmente considerando que o Carro 2 ainda não pontua/não tem IA de verdade (E-303, M3+) — vale a pena investir nisso antes do Carro 2 existir de fato, ou só documentar a intenção por ora?
@@ -180,11 +199,13 @@ Sinalizando pro CTO propagar na revisão do sprint (protocolo §1.1):
 
 ## 5. Próximos passos sugeridos
 
-**Atualizado 2026-07-21 (sessão 2 — Oficina entregue):**
+**Atualizado 2026-07-21 (sessão 4 — Sede/escritórios entregue):**
 
-1. ~~**Prioridade elevada — montar a tela de Oficina de verdade**~~ **— feito nesta sessão (E-207, seção 2.8).** Equipar manual está no ar (`OficinaScene`), com fallback automático só para o caso de ausência de escolha própria.
-2. **Novo — modal de livery/patrocinadores (pendência separada, não é parte de E-207):** CLAUDE.md §5 tela 2 menciona um modal à parte com 6 posições de patrocinador dentro da Oficina. Não modelei nada disso ainda em `economy.ts` — não existe raridade, efeito nem lista de patrocinadores definida. Por ora `livery` na Oficina é só um slot equipável por raridade como os outros 6. Precisa de uma sessão própria pra desenhar o sistema de patrocinadores do zero (efeitos por patrocinador, como cada um dos 6 slots é preenchido/trocado, se tem raridade própria ou é um sistema paralelo).
-3. ~~**Tensão fusão automática vs. equipar manual (seção 2.8)**~~ — **resolvido na sessão 3 (§2.9):** aviso explícito na tela de resumo quando a fusão automática troca a peça efetivamente equipada.
-4. **Bloqueado até a trilha Racing entregar:** a unificação do modelo de posição core/grid (pergunta 1, decisão do PO em Claude-Tech.md §3) — o cálculo de recompensa continua provisório (usa a posição do grid) até isso acontecer.
-5. Rodar o harness com um período mais longo (90 dias) pra confirmar a estimativa de `gold`/`red` citada na pergunta 3 (reformulada, resposta do PO ainda pendente).
-6. Iniciar E-301 (Sede/escritórios) só depois de alguma resposta às perguntas 3/4, já que produção passiva + custos de escritório vão puxar a tabela de Gold pra outro ajuste.
+1. ~~**Montar a tela de Oficina de verdade**~~ — **feito na sessão 2** (E-207, §2.8).
+2. ~~**Tensão fusão automática vs. equipar manual**~~ — **resolvido na sessão 3** (§2.9): aviso explícito na tela de resumo.
+3. ~~**Bloqueado até a trilha Racing entregar (unificação core/grid)**~~ — **a trilha Racing entregou na sessão 11 dela** (Claude-Racing.md §2.29). `computeRaceRewards` já usa `output.position`, agora com a regra de classificação de DNF também aplicada (Claude-Racing.md §2.31) — não é mais provisório.
+4. ~~**Iniciar E-301 (Sede/escritórios)**~~ — **feito nesta sessão** (§2.10). Escopo: só os 7 escritórios de peça, marketing fica de fora (ver item 5).
+5. **Novo — escritório de marketing (parte do E-301 original, deliberadamente fora desta sessão):** CLAUDE.md pede "1 escritório por tipo de peça + 1 de marketing". Não modelado — depende do sistema de patrocinadores da livery (item 6) existir primeiro, senão não há o que o escritório de marketing produziria.
+6. **Modal de livery/patrocinadores (pendência antiga, ainda sem dono de sessão):** CLAUDE.md §5 tela 2 menciona um modal com 6 posições de patrocinador dentro da Oficina. Não modelado — não existe raridade, efeito nem lista de patrocinadores definida. Por ora `livery` é só um slot equipável por raridade como os outros 6. Precisa de uma sessão própria pra desenhar do zero (efeitos por patrocinador, como cada slot é preenchido/trocado, se tem raridade própria ou é sistema paralelo). Destrava o item 5 quando feito.
+7. **Peças equipáveis por carro, não só um pool global** (pedido do PO, sessão 13 da trilha Racing, registrado na seção 3 abaixo): deliberadamente adiado até o Carro 2 (E-303) pontuar de verdade.
+8. Rodar o harness com um período mais longo (90 dias) pra confirmar a estimativa de `gold`/`red` citada na pergunta 3 (CPO já analisou e recomendou manter o ritmo como está — Claude-Marketing.md §3-4 — mas a confirmação a 90 dias segue pendente).

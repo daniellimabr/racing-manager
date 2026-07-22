@@ -3,7 +3,7 @@
 > Documento vivo de contexto do projeto. Anexar no início de novas conversas/tarefas.
 > Ao decidir algo, mover o item de "Questões em aberto" para "Decisões" com a data.
 > Documentos companheiros: Claude-Marketing.md (produto/mercado, CPO) e Claude-Tech.md (engenharia/backlog, CTO). Cada agente de trilha (TechLead-Racing, TechLead-Manager) mantém seu próprio Claude-Racing.md / Claude-Manager.md — ver protocolo na seção 1.1 do Claude-Tech.md.
-> Última atualização: 2026-07-20 (rodada 8 — feedback de playtest do PO: layout de Spa refeito a partir da referência oficial (SVG+imagem), skill `track-layout` + agente `track-layout-validator` criados para isso ser repetível em outras pistas; UX do nitro trocada de toggle+confirmar para 2 botões diretos Sim/Não; boost "pneu" renomeado de novo, agora para "Bono, My Tyres"; HUD ganhou painel de gap-ao-líder de todos os pilotos)
+> Última atualização: 2026-07-21 (rodada 9 — desde a rodada 8, o jogo cresceu muito além do design original desta rodada: Manager inteiro (Hub, Oficina, energia, Gold, peças/fusão, Sede/escritórios) e Tutorial foram implementados (ver seção 5, status por tela), os 8 boosts da seção 6.1 estão todos no core, energia regenera em 12 min/ponto (decisão fechada), e Gate 1 foi tratado como provisório (Claude-Tech.md §7) pra destravar o M2 sem esperar o playtest formal completo dos 2 irmãos. Nenhuma decisão de design nova nesta rodada — só sincronização desta seção com o estado real do jogo. Detalhe sessão a sessão em Claude-Racing.md/Claude-Manager.md/Claude-Tech.md)
 
 ## 1. Visão
 
@@ -79,24 +79,26 @@ Fantasia do jogador: ser o dono/gestor de uma equipe de corrida — e também o 
 
 ## 5. Telas previstas
 
-1. **Garagem/QG (hub)** — carros, energia, próxima corrida, botão CORRER, navegação inferior
-2. **Oficina** — inventário de peças, equipar, fundir, aprimorar
-3. **Pilotos** — contratar, evoluir, escalar quem guia o carro 2
-4. **Equipe/Staff** — contratar 2º piloto, racing engineer, lead mechanic, pit stop team, marketing team (1 de cada por time)
-5. **Sede do time** — escritórios por tipo de peça + marketing, upgrade de nível/raridade, coleta de produção passiva
-6. **Loja** — baús, ofertas diárias, gemas
-7. **Eventos / Temporada** — GPs especiais e passe
-8. **Seleção de campeonato/corrida** — mostra progressão Kart/Turismo/Fórmula e regional/continental
-9. **Corrida (gameplay)** — mapa do circuito em retrato, ícones escalonados (piloto 1 maior, piloto 2 destacado, pódio destacado, demais pequenos), HUD com barra de timing (zonas vermelha/amarela/verde/roxa), botão acelerar/frear, botão nitro, indicador de saúde do carro
-10. **Escolha de boost** — overlay ao completar cada volta
-11. **Resultado/pódio** — posição, pontos de construtores, peças e moedas ganhas, progressão do passe
+**Status de implementação atualizado em 2026-07-21** — detalhe técnico em Claude-Racing.md/Claude-Manager.md.
+
+1. **Garagem/QG (hub)** ✅ implementada (`HubScene`) — carros, energia, próxima corrida, botão CORRER, navegação inferior
+2. **Oficina** ✅ implementada (`OficinaScene`) — inventário de peças, equipar (fusão automática já rodava desde antes; upgrade de raridade só via fusão, sem upgrade direto)
+3. **Pilotos** ⏳ não implementada — contratar, evoluir, escalar quem guia o carro 2
+4. **Equipe/Staff** ⏳ não implementada — contratar 2º piloto, racing engineer, lead mechanic, pit stop team, marketing team (1 de cada por time)
+5. **Sede do time** ✅ implementada (`SedeScene`, 2026-07-21) — só os 7 escritórios de peça por ora; o de marketing depende do sistema de patrocinadores (item 6.1 abaixo), ainda não desenhado. Upgrade de nível existe; coleta de produção passiva também
+6. **Loja** ⏳ não implementada — baús, ofertas diárias, gemas
+7. **Eventos / Temporada** ⏳ não implementada (adiado, seção 7) — GPs especiais e passe
+8. **Seleção de campeonato/corrida** ⏳ não implementada — mostra progressão Kart/Turismo/Fórmula e regional/continental (hoje só existe Spa, corrida única)
+9. **Corrida (gameplay)** ✅ implementada (`RaceScene`) — mapa do circuito em retrato, ícones escalonados (piloto 1 maior, piloto 2 destacado, pódio destacado, demais pequenos), HUD com barra de timing (zonas vermelha/amarela/verde/roxa), botão acelerar/frear, botão nitro (contextual: KERS/Magic), indicador de saúde do carro, tempo de volta
+10. **Escolha de boost** ✅ implementada — overlay ao completar cada volta, todos os 8 conceitos do CLAUDE.md §6.1 no ar
+11. **Resultado/pódio** ✅ implementada — posição (com classificação de DNF correta), Gold e peças ganhas, fusões ocorridas; pontos de construtores/progressão de passe ainda não existem (dependem de M3+)
+12. **Tutorial** ✅ implementada (`TutorialScene`, 2026-07-21, não estava nesta lista original) — 3 páginas estáticas, aparece na 1ª vez ou sob demanda ("Como jogar" no Hub)
 
 ## 6. Questões em aberto (A DEFINIR)
 
 Nenhuma pergunta estrutural em aberto no momento. Pendências de **conteúdo/detalhamento futuro** (não bloqueiam o design):
 
-- Curadoria de quantos desafios de curva existem em cada pista real/fictícia (feita pista a pista, mais à frente).
-- Valor exato de regeneração de energia (ex.: 1 a cada X minutos).
+- Curadoria de quantos desafios de curva existem em cada pista real/fictícia (feita pista a pista, mais à frente — só Spa tem curadoria completa até 2026-07-21).
 - Passe de Temporada e estratégia de monetização — deliberadamente adiados (ver seção 7).
 
 ### 6.1 Boosts por volta (aprovado como ponto de partida)
@@ -109,12 +111,14 @@ Cada saída elegível (largada, última saída de cada volta) oferece 1 de 3 op�
 - **Reparo rápido** ✅ implementado: recupera uma fatia de saúde na próxima frenagem/pit resolvida
 - **Janela ampliada** ✅ implementado nesta rodada (estava na lista desde a rodada 6 mas sem nenhum efeito real no código — bug corrigido): aumenta o tempo disponível para acertar o timing na próxima frenagem/pit
 - **Recuperação de erro** ✅ implementado: reduz a perda de tempo do próximo erro (vermelho/miss) numa frenagem/pit
-- **Rasante (slipstream)** ⏳ ainda não implementado no core
-- **Fôlego de ultrapassagem** ⏳ ainda não implementado no core
+- **Rasante (slipstream)** ✅ implementado (2026-07-21): +25% no ganho da própria saída em que foi escolhido (não uma saída futura), se o resultado já for positivo
+- **Fôlego de ultrapassagem** ✅ implementado (2026-07-21): alarga o gap máximo em que dá pra tentar ultrapassar (1,0s → 1,5s) na próxima frenagem/pit
+
+Os 8 conceitos originais estão todos implementados no core desde 2026-07-21.
 
 ### 6.2 Economia (aprovada)
 
-- **Energia**: teto de **30** (superável só ganhando prêmio em um slot); custo de **5 por corrida**; regenera com o tempo real, estilo Archero (valor exato de regen a definir); recarga extra via anúncio recompensado ou Aura.
+- **Energia**: teto de **30** (superável só ganhando prêmio em um slot); custo de **5 por corrida**; regenera com o tempo real, estilo Archero — **12 minutos por ponto, decidido e implementado em 2026-07-21** (valor real do Archero, verificado via busca — Claude-Manager.md §2.1); recarga extra via anúncio recompensado ou Aura.
 - **Gold (moeda soft)**: ganho ao final de cada corrida (por posição) + produção passiva dos escritórios da base (coletada manualmente, como no Archero). Usado para investir em escritórios, pilotos e equipe.
 - **Aura (moeda premium)**: comprada ou ganha em eventos. Usada para: recarregar energia, abrir baús premium, acelerar produção dos escritórios, reparo/revive pós-DNF.
 - **Baús de peças**: bronze/prata/ouro/platina, com chance de raridade crescente (cinza→vermelho). Ganhos em corridas, eventos e loja (slots).
