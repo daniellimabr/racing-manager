@@ -3,7 +3,7 @@ import spaTrack from '../../tracks/spa.json';
 import type { TrackDef, RaceState, RaceEvent, Tier, BoostId, CarSetup } from '../core/types.js';
 import {
   createRace, currentEvent, resolveCurrent, advance, revive, toRaceOutput,
-  setOvertakeAttempt, applyBoost, tryUseNitro, raceStandings,
+  setOvertakeAttempt, applyBoost, tryUseNitro, raceStandings, abandonRace,
 } from '../core/raceState.js';
 import { tierFromPosition, zoneHalves, computeScale, canAttemptOvertake, combineTiers } from '../core/timing.js';
 import type { GridStanding, TeammateProfile } from '../core/grid.js';
@@ -16,6 +16,7 @@ import {
   RAMP_DURATION_MS, ACCEL_CENTER, BRAKE_CENTER, JANELA_DURATION_SCALE,
   LARGADA_PREP_MS, LARGADA_LIGHT_INTERVAL_MS, LARGADA_HOLD_MIN_MS, LARGADA_HOLD_MAX_MS,
   LARGADA_HOLD_RATE, LARGADA_FALL_RATE, LARGADA_ZONE_SCALE,
+  VISUAL_CATCHUP_HALFLIFE_MS, BULLET_TIME_SLOWDOWN, NORMAL_LEG_SPEED_T_PER_MS, LEG_PROGRESS_CAP,
 } from './viewConstants.js';
 import { track as trackEvent } from '../telemetry/analytics.js';
 import { juice } from './juice.js';
@@ -75,6 +76,16 @@ interface IconEntry {
   container: Phaser.GameObjects.Container;
   circle: Phaser.GameObjects.Arc;
   label: Phaser.GameObjects.Text;
+  /** Posição atual (0..1, fração do traçado) perseguindo o alvo continuamente — ver `tickVisualPositions`. `undefined` até o 1º tick (snap imediato). */
+  visualT?: number;
+}
+
+/** Menor distância com sinal (na circular 0..1, com wrap) de `from` até `to` — usada pra perseguir o alvo sempre pelo caminho mais curto na pista fechada. */
+function shortestDeltaT(from: number, to: number): number {
+  let d = (to - from) % 1;
+  if (d > 0.5) d -= 1;
+  if (d < -0.5) d += 1;
+  return d;
 }
 
 export class RaceScene extends Phaser.Scene {
@@ -116,6 +127,24 @@ export class RaceScene extends Phaser.Scene {
   private pitAnnounced = false;
   private raceStartTime = 0;
   private raceEnded = false;
+
+  // Bullet time (sessão 15): true enquanto o jogador está decidindo/resolvendo
+  // o desafio do evento atual — desacelera o avanço contínuo dos carros sem
+  // nunca parar de vez. Ver NORMAL_LEG_SPEED_T_PER_MS/BULLET_TIME_SLOWDOWN.
+  private bulletTime = false;
+
+  // Posição visual contínua do jogador (fração 0..1 do traçado) — sempre
+  // avança em direção ao próximo evento, nunca fica parada. Ver
+  // `advancePlayerRefT` e o comentário de NORMAL_LEG_SPEED_T_PER_MS
+  // (viewConstants.ts) pro racional completo.
+  private visualPlayerT = 0;
+  private visualPlayerTInitialized = false;
+
+  // Pausa (sessão 15): botão no HUD abre um modal com "Continuar"/"Desistir".
+  private paused = false;
+  private pauseStartedAt = 0;
+  private pauseOverlay?: Phaser.GameObjects.Container;
+  private pauseButtonContainer?: Phaser.GameObjects.Container;
 
   // E-202 (Manager, M2): recompensa da corrida atual, calculada 1x em showSummary()
   private lastReward: RaceRewardResult | null = null;
@@ -166,9 +195,14 @@ export class RaceScene extends Phaser.Scene {
     this.raceState = createRace(track, this.carSetup, { teammate: this.teammate });
     this.raceStartTime = Date.now();
     this.raceEnded = false;
+    this.bulletTime = false;
+    this.paused = false;
+    this.pauseOverlay = undefined;
+    this.visualPlayerTInitialized = false;
     trackEvent('race_start', { trackId: track.id });
 
     this.buildHud();
+    this.buildPauseButton();
 
     this.trackGraphics = this.add.graphics();
     this.drawTrack();
@@ -182,7 +216,8 @@ export class RaceScene extends Phaser.Scene {
 
     this.input.once('pointerdown', () => juice.unlock());
 
-    this.updateIconPositions(false);
+    this.tickVisualPositions(0);
+    this.updateHud();
     this.showCountdown(() => this.startEventCycle());
   }
 
@@ -216,11 +251,17 @@ export class RaceScene extends Phaser.Scene {
   update(time: number): void {
     const dt = this.lastFrameTime ? time - this.lastFrameTime : 0;
     this.lastFrameTime = time;
+    // Pausado: não avança nada (nem o crawl contínuo dos carros, nem o
+    // cursor/largada) — `this.time.paused` já congela os TimerEvents; os
+    // anchors baseados em `this.time.now` (challengeStartTime/largada*) são
+    // compensados em `closePauseMenu()` pelo tempo total pausado.
+    if (this.paused) return;
     if (this.challengeMode === 'hold') {
       if (this.challengeActive) this.updateLargada(time, dt);
     } else if (this.challengeActive) {
       this.drawCursor();
     }
+    this.tickVisualPositions(dt);
   }
 
   // ---------- desenho estático ----------
@@ -291,18 +332,65 @@ export class RaceScene extends Phaser.Scene {
     return TEAM_COLORS[standing.teamId] ?? 0xffffff;
   }
 
-  /** Recalcula a posição de todos os ícones a partir do evento atual + gaps do grid. */
-  private updateIconPositions(animate: boolean): void {
-    const standings = this.currentStandings();
+  /**
+   * Avança `visualPlayerT` continuamente em direção ao PRÓXIMO evento
+   * (espiado com antecedência — `state.events` é pré-computado), nunca em
+   * direção ao evento atual (que fica parado até `advance()` rodar) — ver
+   * comentário completo em `NORMAL_LEG_SPEED_T_PER_MS` (viewConstants.ts)
+   * sobre por que perseguir um alvo fixo não resolvia o "carro parado".
+   * `LEG_PROGRESS_CAP` trava o avanço perto da marca do próximo evento, sem
+   * chegar/passar antes de `advance()` commitar. Recalcula a distância já
+   * percorrida do zero a cada frame (não acumula um contador à parte), então
+   * a transição para o próximo evento não precisa de nenhum reset explícito.
+   */
+  private advancePlayerRefT(dtMs: number): number {
     const s = this.raceState;
-    const referenceEvent = s.finished ? s.events[s.events.length - 1] : currentEvent(s);
-    const refT = pathIndexToT(pathIndexForEvent(referenceEvent), track.path.length);
+    const lastEvent = s.events[s.events.length - 1];
+    const curT = pathIndexToT(pathIndexForEvent(s.finished ? lastEvent : currentEvent(s)), track.path.length);
+
+    if (!this.visualPlayerTInitialized) {
+      this.visualPlayerT = curT;
+      this.visualPlayerTInitialized = true;
+    }
+
+    if (s.finished) {
+      // corrida encerrada: trava no último evento, sem mais avanço.
+      this.visualPlayerT = curT;
+      return this.visualPlayerT;
+    }
+
+    const nextEvent = s.events[s.eventIndex + 1] ?? currentEvent(s);
+    const nextT = pathIndexToT(pathIndexForEvent(nextEvent), track.path.length);
+    const legDist = Math.max(0, shortestDeltaT(curT, nextT));
+
+    const speedTPerMs = this.bulletTime
+      ? NORMAL_LEG_SPEED_T_PER_MS / BULLET_TIME_SLOWDOWN
+      : NORMAL_LEG_SPEED_T_PER_MS;
+    let progress = Math.max(0, shortestDeltaT(curT, this.visualPlayerT));
+    progress = Math.min(legDist * LEG_PROGRESS_CAP, progress + speedTPerMs * dtMs);
+    this.visualPlayerT = curT + progress;
+    return this.visualPlayerT;
+  }
+
+  /**
+   * Posiciona todos os ícones do grid a partir da referência contínua do
+   * jogador (`advancePlayerRefT`) + gap — o pelotão inteiro anda junto com o
+   * crawl do jogador. Uma suavização de polimento por ícone (meia-vida curta,
+   * fixa — não escala com `bulletTime`, que já é tratado na referência)
+   * absorve saltos pequenos de gap entre carros (ex.: ultrapassagem
+   * registrada no grid a cada `advance()`), sem representar mais a
+   * velocidade geral do avanço.
+   */
+  private tickVisualPositions(dtMs: number): void {
+    const standings = this.currentStandings();
+    const refT = this.advancePlayerRefT(dtMs);
     // `refT` é a posição do JOGADOR (deriva do evento atual dele), não do líder.
     // Cada carro precisa ser deslocado pelo gap RELATIVO AO JOGADOR, não pelo
     // `gapToLeader` bruto — senão o líder (gapToLeader = 0) cai exatamente em
     // cima de `refT`, ou seja, em cima do próprio jogador, ficando mais errado
     // quanto maior o gap do jogador (bug reportado em playtest, Claude-Racing.md §2.22).
     const playerGapToLeader = standings.find((x) => x.isPlayer)?.gapToLeader ?? 0;
+    const factor = dtMs > 0 ? 1 - Math.pow(0.5, dtMs / VISUAL_CATCHUP_HALFLIFE_MS) : 0;
 
     for (const standing of standings) {
       let entry = this.icons.get(standing.id);
@@ -317,20 +405,14 @@ export class RaceScene extends Phaser.Scene {
 
       const gapToPlayer = standing.gapToLeader - playerGapToLeader;
       const clampedGap = Math.max(-MAX_VISUAL_GAP_SECONDS, Math.min(MAX_VISUAL_GAP_SECONDS, gapToPlayer));
-      const t = refT - clampedGap / SECONDS_PER_LAP_VISUAL;
-      const point = pointAtT(track.path, t);
-      const screen = normalizedToScreen(point, TRACK_RECT);
+      const targetT = refT - clampedGap / SECONDS_PER_LAP_VISUAL;
 
-      if (animate) {
-        this.tweens.add({
-          targets: entry.container, x: screen.x, y: screen.y,
-          duration: TWEEN_DURATION_MS, ease: 'Sine.easeInOut',
-        });
-      } else {
-        entry.container.setPosition(screen.x, screen.y);
-      }
+      entry.visualT = entry.visualT === undefined ? targetT : entry.visualT + shortestDeltaT(entry.visualT, targetT) * factor;
+
+      const point = pointAtT(track.path, entry.visualT);
+      const screen = normalizedToScreen(point, TRACK_RECT);
+      entry.container.setPosition(screen.x, screen.y);
     }
-    this.updateHud();
   }
 
   /** Monta os elementos estáticos do HUD (mockup A) uma única vez; updateHud() só atualiza valores. */
@@ -380,6 +462,75 @@ export class RaceScene extends Phaser.Scene {
       });
       this.hudLeaderboardTexts.push(t);
     }
+  }
+
+  /**
+   * Botão de pausa (sessão 15, pedido do PO): abre um modal com "Continuar" e
+   * "Desistir da corrida" (DNF instantâneo por desistência). Fica no centro
+   * do topo do HUD — única faixa livre entre a posição/volta (esquerda) e o
+   * gap (direita).
+   */
+  private buildPauseButton(): void {
+    const w = 46, h = 28, x = CANVAS_WIDTH / 2 - w / 2, y = 6;
+    const container = this.add.container(x, y).setDepth(900);
+    const bg = this.add.rectangle(0, 0, w, h, 0x333640, 1).setOrigin(0, 0)
+      .setStrokeStyle(1, 0x556677).setInteractive({ useHandCursor: true });
+    const text = this.add.text(w / 2, h / 2, 'II', { fontSize: '14px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
+    bg.on('pointerdown', () => {
+      juice.click();
+      this.openPauseMenu();
+    });
+    container.add([bg, text]);
+    this.pauseButtonContainer = container;
+  }
+
+  private openPauseMenu(): void {
+    if (this.paused || this.raceState.dnf || this.raceState.finished) return;
+    this.paused = true;
+    this.pauseStartedAt = this.time.now;
+    this.time.paused = true;
+
+    const overlay = this.add.container(0, 0).setDepth(2000);
+    const bg = this.add.rectangle(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT, 0x000000, 0.75)
+      .setOrigin(0, 0).setInteractive();
+    overlay.add(bg);
+    overlay.add(this.add.text(CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 110, 'PAUSADO', {
+      fontSize: '28px', color: '#ffffff', fontStyle: 'bold',
+    }).setOrigin(0.5));
+
+    const btnW = CANVAS_WIDTH - 80;
+    overlay.add(this.makeButton(40, CANVAS_HEIGHT / 2 - 44, btnW, 48, 'Continuar', 0x64b5f6, () => {
+      this.closePauseMenu();
+    }));
+    overlay.add(this.makeButton(40, CANVAS_HEIGHT / 2 + 24, btnW, 48, 'Desistir da corrida', 0xe57373, () => {
+      this.time.paused = false;
+      overlay.destroy();
+      this.pauseOverlay = undefined;
+      this.paused = false;
+      this.bulletTime = false;
+      this.pauseButtonContainer?.setVisible(false);
+      trackEvent('race_abandon', { trackId: track.id, lap: this.raceState.lap });
+      abandonRace(this.raceState);
+      this.showSummary(true);
+    }));
+
+    this.pauseOverlay = overlay;
+  }
+
+  private closePauseMenu(): void {
+    // Compensa os anchors de tempo do desafio ativo (baseados em `this.time.now`,
+    // que continua correndo mesmo com `this.time.paused` — só os TimerEvents
+    // congelam) pelo tempo total em que o jogo ficou pausado, senão o cursor
+    // "pula" pra frente ao despausar.
+    const pausedDuration = this.time.now - this.pauseStartedAt;
+    this.challengeStartTime += pausedDuration;
+    this.largadaGoAt += pausedDuration;
+    this.largadaLightsDoneAt += pausedDuration;
+
+    this.time.paused = false;
+    this.pauseOverlay?.destroy();
+    this.pauseOverlay = undefined;
+    this.paused = false;
   }
 
   private updateLeaderboardPanel(standings: GridStanding[]): void {
@@ -479,12 +630,17 @@ export class RaceScene extends Phaser.Scene {
   private startEventCycle(): void {
     this.clearPanel();
     this.updateHud();
+    this.pauseButtonContainer?.setVisible(true);
 
     if (this.raceState.dnf) {
+      this.bulletTime = false;
+      this.pauseButtonContainer?.setVisible(false);
       this.showDnfOverlay();
       return;
     }
     if (this.raceState.finished) {
+      this.bulletTime = false;
+      this.pauseButtonContainer?.setVisible(false);
       this.showSummary();
       return;
     }
@@ -539,6 +695,10 @@ export class RaceScene extends Phaser.Scene {
   }
 
   private showPreChallenge(ev: RaceEvent): void {
+    // Bullet time (sessão 15): a partir daqui o jogador está decidindo/
+    // resolvendo o desafio deste evento — carros desaceleram (não param) até
+    // `resolveChallenge` desligar isto de novo.
+    this.bulletTime = true;
     const isSaida = ev.kind === 'saida';
     const isPit = ev.kind === 'pit';
     if (isPit && !this.pitAnnounced) {
@@ -768,7 +928,7 @@ export class RaceScene extends Phaser.Scene {
     const holdBtn = this.add.container(16, barY + barH + 20);
     const bg = this.add.rectangle(0, 0, barW, 56, 0xffffff, 1).setOrigin(0, 0).setInteractive({ useHandCursor: true });
     const text = this.add.text(barW / 2, 28, 'SEGURE', { fontSize: '13px', color: '#111111', fontStyle: 'bold' }).setOrigin(0.5);
-    bg.on('pointerdown', () => { juice.click(); this.largadaHolding = true; });
+    bg.on('pointerdown', () => { if (this.paused) return; juice.click(); this.largadaHolding = true; });
     bg.on('pointerup', () => { this.largadaHolding = false; });
     bg.on('pointerout', () => { this.largadaHolding = false; });
     holdBtn.add([bg, text]);
@@ -832,7 +992,7 @@ export class RaceScene extends Phaser.Scene {
   }
 
   private handleTap(): void {
-    if (!this.challengeActive) return;
+    if (this.paused || !this.challengeActive) return;
     const pos = this.currentCursorPos();
     const tier = tierFromPosition(pos, this.challengeHalves, this.challengeCenter);
     this.onChallengeTapResolved(tier);
@@ -875,6 +1035,10 @@ export class RaceScene extends Phaser.Scene {
   }
 
   private resolveChallenge(tier: Tier): void {
+    // Bullet time desliga assim que o resultado é conhecido — carros voltam
+    // à velocidade normal pra "ilustrar" o resultado (ex.: ultrapassagem) e
+    // seguir até o próximo evento (ver tickVisualPositions/showPreChallenge).
+    this.bulletTime = false;
     const ev = currentEvent(this.raceState);
     const challengeId = ev.cornerId ?? (ev.kind === 'pit' ? 'pit' : 'largada');
     const gapBefore = this.raceState.gapToAhead;
@@ -938,9 +1102,12 @@ export class RaceScene extends Phaser.Scene {
   private advanceAndAnimate(): void {
     // `advance()` agora também avança o grid internamente (sessão 11, ver
     // Claude-Racing.md §3/§6 item 5) — não precisa mais de um `advanceGrid`
-    // separado aqui em lockstep.
+    // separado aqui em lockstep. O deslocamento visual dos ícones em direção
+    // ao novo evento é contínuo (`tickVisualPositions`, chamado todo frame em
+    // `update()`) — não precisa mais disparar aqui; este delay é só um
+    // respiro de ritmo antes de mostrar a próxima decisão.
     advance(this.raceState);
-    this.updateIconPositions(true);
+    this.updateHud();
     this.time.delayedCall(TWEEN_DURATION_MS, () => this.startEventCycle());
   }
 

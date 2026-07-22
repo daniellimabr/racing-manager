@@ -16,8 +16,14 @@ export const TRACK_RECT = {
   height: CANVAS_HEIGHT - HUD_HEIGHT - PANEL_HEIGHT,
 };
 
-/** tempo (ms) de uma volta completa do cursor (0 -> 100 -> 0) na barra de timing — usado só no pit (sweep contínuo, T-105 não mudou isso) */
-export const CURSOR_SWEEP_PERIOD_MS = 900;
+/**
+ * tempo (ms) de uma volta completa do cursor (0 -> 100 -> 0) na barra de
+ * timing — usado só no pit (sweep contínuo, T-105 não mudou isso). Reduzido
+ * 900 → 700 na sessão 15 (pedido do PO: "cursor um pouco mais rápido", junto
+ * com a redução de zona em ZONE_BASE_HALVES) — ~22% mais rápido, ajuste
+ * moderado (o PO não pediu overshoot aqui, diferente das zonas).
+ */
+export const CURSOR_SWEEP_PERIOD_MS = 700;
 /** tempo limite (ms) para apertar o botão antes de contar como "miss" automático — usado só no pit */
 export const CHALLENGE_TIME_LIMIT_MS = 1500;
 /**
@@ -33,8 +39,13 @@ export const PRE_CHALLENGE_TIME_LIMIT_MS = 3000;
  * frenagem e aceleração deixam de usar o vaivém contínuo e passam a ser uma
  * única passagem (0->100) representando a aproximação/aceleração, não mais
  * um cursor oscilando indefinidamente.
+ *
+ * Reduzido 1300 → 1000 na sessão 15 (pedido do PO: "cursor um pouco mais
+ * rápido", junto com ZONE_BASE_HALVES menor) — ~23% mais rápido, ajuste
+ * moderado (pedido explicitamente como "um pouco", não um overshoot agressivo
+ * como as zonas).
  */
-export const RAMP_DURATION_MS = 1300;
+export const RAMP_DURATION_MS = 1000;
 /** centro da zona ideal na aceleração — perto do fim do percurso (limite de grip), não no meio */
 export const ACCEL_CENTER = 75;
 export const BRAKE_CENTER = 50;
@@ -64,8 +75,52 @@ export const LARGADA_FALL_RATE = 0.065; // unidades/ms caindo quando solta
  * `computeScale()` só na largada, ver `startTimingChallenge` (RaceScene.ts).
  */
 export const LARGADA_ZONE_SCALE = 0.7;
-/** duração da animação dos carros entre eventos (T-104: 0,8–1,2s por trecho) */
+/**
+ * Pausa de ritmo (não mais duração de tween — ver nota da sessão 15 abaixo)
+ * entre resolver um evento e mostrar a decisão do próximo, dando tempo de ler
+ * o resultado antes da próxima tela aparecer (T-104: 0,8–1,2s por trecho).
+ */
 export const TWEEN_DURATION_MS = 1000;
+
+/**
+ * Reformulação da animação da corrida (sessão 15, feedback do PO: "o visual
+ * dos carros parados na pista é bem ruim, fica parecendo um jogo de trivia").
+ *
+ * Tentativa inicial (perseguir um alvo fixo — a posição do evento atual —
+ * com suavização exponencial, só variando a velocidade de perseguição por
+ * `bulletTime`) não resolvia o problema de verdade: o alvo fica PARADO
+ * durante toda a decisão (só muda quando `advance()` roda), e a fase normal
+ * (rápida) já alcançava esse alvo bem antes do desafio começar — resultado:
+ * o carro chegava e ficava parado do mesmo jeito, só que com um pequeno
+ * "ease-in" na chegada. Verificado visualmente (Playwright, sessão 15):
+ * ícones idênticos em screenshots tiradas 500ms+ à parte durante o passo de
+ * decisão (nitro/overtake).
+ *
+ * Modelo corrigido: o jogador tem uma posição visual contínua
+ * (`RaceScene.visualPlayerT`) que sempre avança para frente, todo frame, na
+ * direção do PRÓXIMO evento (`state.events[eventIndex+1]`, espiado com
+ * antecedência — a sequência de eventos é pré-computada) — nunca fica parada
+ * enquanto o desafio atual não resolve, só desacelera. `LEG_PROGRESS_CAP`
+ * trava o avanço perto (não em cima) da marca do próximo evento, pra nunca
+ * "chegar e passar" antes de `advance()` de fato commitar essa transição —
+ * sem isso, uma cadeia de decisões muito longa (múltiplos timeouts em
+ * sequência) poderia fazer o ícone ultrapassar visualmente curvas que ainda
+ * nem começaram. Como a progressão é recalculada do zero a cada frame a
+ * partir da distância até o evento atual (não um contador incremental
+ * separado), a transição de uma etapa pra próxima (`advance()`) não precisa
+ * de nenhum reset explícito — ela simplesmente continua de onde estava.
+ *
+ * Os outros 11 carros do grid continuam posicionados por deslocamento de gap
+ * em relação a essa mesma referência contínua do jogador (mesmo modelo de
+ * sempre) — o pelotão inteiro "anda junto" com o crawl do jogador.
+ */
+export const NORMAL_LEG_SPEED_T_PER_MS = 0.00005; // ~1s pra cruzar uma perna típica de Spa (~5% da volta) em velocidade normal — comparável ao antigo TWEEN_DURATION_MS fixo
+/** Quanto maior, mais lento o "bullet time" (divide a velocidade normal de avanço durante a decisão/desafio ativo). */
+export const BULLET_TIME_SLOWDOWN = 10;
+/** Fração máxima da distância até o próximo evento que o avanço contínuo pode cobrir antes de `advance()` commitar a transição (nunca chega a 100%, evita "ultrapassar" visualmente um evento ainda não resolvido). */
+export const LEG_PROGRESS_CAP = 0.95;
+/** Meia-vida (ms) da suavização de polimento por ícone — absorve saltos pequenos de gap entre carros (ex.: ultrapassagem registrada no grid), não representa mais a velocidade geral do crawl (isso agora é NORMAL_LEG_SPEED_T_PER_MS/BULLET_TIME_SLOWDOWN). */
+export const VISUAL_CATCHUP_HALFLIFE_MS = 220;
 
 /**
  * Tempo (ms) entre o desafio aparecer na tela (rótulo + barra visíveis, cursor

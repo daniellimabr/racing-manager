@@ -207,13 +207,17 @@ export const MAX_SCALE = 1.5;
  * sessão 13: "ainda está fácil. Tô vencendo tudo com facilidade [...] hoje tá
  * fácil sem boost."** 6 não foi suficiente. Pedido explícito do PO: "pode
  * pegar pesado, pra eu validar o limite" — reduzido de propósito pra um valor
- * agressivo (6 → **3**, metade), não é a calibração final. **Isto continua
- * NÃO validado pelo harness de bots** — os bots simulam o resultado de cada
- * tier por sorteio de probabilidade fixa por perfil, não a dificuldade física
- * de acertar a zona (depende de reflexo humano real). Objetivo desta rodada é
- * sondar o limite superior de dificuldade, não acertar de primeira.
+ * agressivo (6 → 3, metade), não era a calibração final.
+ *
+ * **Sessão 15: testado de novo pelo PO, ainda "muito fácil" com purple=3.**
+ * Overshoot de propósito de novo, mesmo espírito das rodadas anteriores (ver
+ * [[feedback-calibration-overshoot]]): purple 3→**1.5**, green 20→**10**,
+ * amber 35→**20** (todas ~metade do valor anterior). Continua não validado
+ * pelo harness de bots (mesma ressalva de sempre — depende de reflexo humano
+ * real). Objetivo: sondar se este novo piso já é difícil demais, não acertar
+ * de primeira.
  */
-export const ZONE_BASE_HALVES = { purple: 3, green: 20, amber: 35 };
+export const ZONE_BASE_HALVES = { purple: 1.5, green: 10, amber: 20 };
 
 /**
  * ~~POSITION_UNIT_SECONDS~~ — REMOVIDA na sessão 11 (unificação core/grid, ver

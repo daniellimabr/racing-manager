@@ -249,6 +249,18 @@ export function advance(state: RaceState, rng: () => number = Math.random): void
   advanceGrid(state.grid, rng, wasSaida);
 }
 
+/**
+ * DNF instantâneo por desistência do jogador (botão de pausa → "Desistir da
+ * corrida", sessão 15). Diferente de `resolveCurrent` zerando a saúde ou
+ * batida forte: aqui não há penalidade de Gold nem oferta de revive — é uma
+ * decisão deliberada do jogador de encerrar, não uma falha de pilotagem.
+ */
+export function abandonRace(state: RaceState): void {
+  if (state.dnf || state.finished) return;
+  state.dnf = true;
+  state.dnfReason = 'desistência';
+}
+
 /** Volta à corrida após DNF, 1x por corrida, com metade da saúde. */
 export function revive(state: RaceState): boolean {
   if (state.usedRevive) return false;
