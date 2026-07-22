@@ -3,7 +3,7 @@
 > Documento companheiro do CLAUDE.md (design/PO) e do Claude-Marketing.md (produto/mercado/CPO). Este arquivo é o repositório de engenharia: decisões técnicas, arquitetura, organização das trilhas/agentes, telemetria, bots testadores e backlog priorizado.
 > Dono: CTO (agente). Anexar em toda conversa/tarefa de desenvolvimento (Claude Code/Cowork).
 > Ao decidir algo técnico, registrar aqui com data. Ao concluir tarefa, marcar status.
-> Última atualização: 2026-07-21 (rodada 7 — sincronização ampla após várias sessões paralelas das trilhas Racing/Manager/CPO no mesmo dia. Estado real do projeto neste ponto: M1 com Gate 1 tratado como provisório (seção 7); M2 muito além do MVP original — E-201 a E-207 (energia, hub, recompensas, inventário/fusão, persistência, Oficina) e E-301 (Sede/escritórios, já M3+ na numeração original) todos entregues; core/grid unificado (dívida técnica antiga, resolvida); DNF ganhou classificação de verdade (bug real reportado pelo PO, corrigido); calibração de dificuldade (zona roxa, piso de saúde) em rodada de sondagem agressiva a pedido do PO. Detalhe completo sessão a sessão em Claude-Racing.md e Claude-Manager.md — este documento só consolida o estado macro. Ver seção 11 pro resumo de "onde o projeto está agora")
+> Última atualização: 2026-07-21 (rodada 8 — sessão 14, PO autorizou avançar sem interrupção sobre uma lista combinada Racing+Manager. Estado real do projeto neste ponto: M1 com Gate 1 tratado como provisório (seção 7); M2 completo; M3+ ganhou 4 épicos de uma vez — E-301 (Sede/escritórios, com o 8º escritório de marketing que faltava), E-302 (Pilotos), E-303 (Carro 2 pontuando de verdade) e E-305 (Loja/baús + Aura), mais o sistema de patrocinadores da livery que destravava o escritório de marketing (pendência registrada desde a sessão 13). Do lado Racing: ultrapassagem redesenhada (piso de dificuldade + bônus de sucesso) e largada mais lenta, a pedido do PO; pista de Spa temporariamente em 4 voltas pra ciclo de teste mais rápido. `GameSave` avançou de v4 pra v7. Detalhe completo sessão a sessão em Claude-Racing.md e Claude-Manager.md — este documento só consolida o estado macro. Ver seção 11 pro resumo de "onde o projeto está agora")
 
 ## 1. Organização do time (humanos + agentes)
 
@@ -133,7 +133,7 @@ Proposta do CTO para a T-003, sujeita a ajuste do TechLead/PO:
 | **M0 — Fundação** (Sprint 1) | Projeto estruturado, core extraído, Spa como dado, harness v1, telemetria, deploy | Tudo roda: bots geram relatório; link abre no celular |
 | **M1 — Corrida jogável** (Sprints 2–4) | Spa completo, grid de 12 carros simulado (10 oponentes + 2 do jogador), tela de corrida final (Q12), feel pass, boosts/pit/DNF/revive/resumo | **Gate 1 (humano):** playtest com PO + irmãos; funil de telemetria saudável; "quer jogar de novo?" ≥ 4/5. **Tratado como provisório em 2026-07-21** — irmãos indisponíveis, soft-launch público descartado por ora (greybox não apresentável); PO decidiu destravar o M2 com o sinal já existente (várias sessões próprias, nota 5/5 repetida, telemetria completa, harness). Sinal mais fraco que o planejado — ver decisão datada na seção 3 |
 | **M2 — Meta mínimo viável** (Sprints 5–8, ~4–6 semanas conforme regra do CPO) | Energia, recompensas pós-corrida, inventário + fusão + upgrade afetando zonas, hub Garagem, persistência, Oficina (equipar manual) | ✅ **Entregue por completo** (E-201 a E-207, ver seção 8) — inclusive além do MVP original (Oficina, E-207, não estava no escopo inicial do M2). **Gate 2** (D7 direcional + economia validada pelos bots) ainda não avaliado — falta base de testers pra D7 significar algo; economia já validada pelo harness (`tools/economyHarness.ts`) |
-| **M3+** | Sede/escritórios, pilotos/equipe, carro 2 IA pontuando, campeonato de 10 corridas, categorias, loja/baús, leaderboard assíncrono (sonda do risco P3 do CPO) | Por época, a definir. **E-301 (Sede/escritórios) já entregue** (sessão 13, adiantado do M3+ original — ver seção 8) |
+| **M3+** | Sede/escritórios, pilotos/equipe, carro 2 IA pontuando, campeonato de 10 corridas, categorias, loja/baús, leaderboard assíncrono (sonda do risco P3 do CPO) | Por época, a definir. **E-301 (Sede/escritórios), E-302 (Pilotos), E-303 (Carro 2 pontuando) e E-305 (Loja/baús + Aura) já entregues** (sessões 13/14, adiantados do M3+ original — ver seção 8) |
 
 ## 8. Backlog priorizado
 
@@ -200,9 +200,17 @@ E-201 Energia (teto 30, custo 5, regen 12 min/ponto — verificado contra o Arch
 
 ### M3+ — Épicos
 
-**E-301 Sede/escritórios ✅ entregue (sessão 13, adiantado)** — produção passiva + coleta, 7 escritórios (1 por tipo de peça; o de marketing ficou de fora de propósito, depende do sistema de patrocinadores da livery, ainda não desenhado). Detalhe em `Claude-Manager.md`.
+**E-301 Sede/escritórios ✅ entregue (sessão 13, adiantado)** — produção passiva + coleta, 7 escritórios de peça + o 8º (marketing) entregue na sessão 14 junto do sistema de patrocinadores. Detalhe em `Claude-Manager.md`.
 
-Restam: E-302 Pilotos e equipe/staff (efeitos no RaceInput: pitCrewQuality, dev. do carro) · E-303 Carro 2 IA pontuando (campeonato de construtores) · E-304 Campeonato de 10 corridas + progressão Kart→Turismo→Fórmula · E-305 Loja/baús · E-306 Leaderboard assíncrono de tempo de volta (sonda barata do risco P3) · E-307 Novas pistas (pipeline de dados da T-003, skill `track-layout` já existe — só falta uma sessão pra usar num circuito novo) · Sistema de patrocinadores da livery (não numerado ainda, pendência registrada em `Claude-Manager.md` §2.8, "precisa de sessão própria pra desenhar do zero").
+**E-302 Pilotos ✅ entregue (sessão 14)** — roster fixo de 4 candidatos contratáveis, skills mapeadas pra tier weights/paceFactor do Carro 2 + bônus de zoneScale (`devCarro`) pro time inteiro. `PilotosScene` nova. Detalhe em `Claude-Manager.md` §2.11.
+
+**E-303 Carro 2 IA pontuando ✅ entregue (sessão 14)** — o companheiro de equipe (antes um perfil "Médio" fixo, só decorativo no HUD) agora é configurável via `TeammateProfile` (`core/grid.ts`, trilha Racing) a partir do piloto escalado; resumo da corrida mostra a posição final do Carro 2. Campeonato de construtores (agregação entre corridas) ainda não existe — só a pontuação de 1 corrida.
+
+**E-305 Loja/baús + Aura ✅ entregue (sessão 14)** — 4 tiers de baú (bronze/prata/ouro/platina), moeda premium Aura ganha só de pódio (única fonte modelada — IAP real continua fora de escopo). `LojaScene` nova. Detalhe em `Claude-Manager.md` §2.11.
+
+**Sistema de patrocinadores da livery ✅ entregue (sessão 14)** — 8 patrocinadores fixos pra 6 posições, custo em Reputação (produzida pelo escritório de marketing, item acima), bônus % de Gold por corrida. `MarketingScene` nova (não o modal originalmente descrito no CLAUDE.md — simplificação deliberada, ver `Claude-Manager.md` §2.11).
+
+Restam: E-304 Campeonato de 10 corridas + progressão Kart→Turismo→Fórmula (PO adiou explicitamente na sessão 14 até a 2ª pista existir — "quando criarmos a 2ª pista, vai fazer sentido criarmos já o 1º campeonato") · E-306 Leaderboard assíncrono de tempo de volta (sonda barata do risco P3) · E-307 Novas pistas (pipeline de dados da T-003, skill `track-layout` já existe — só falta uma sessão pra usar num circuito novo, e uma referência real/SVG oficial do próximo circuito) · Peças equipáveis por carro, não só um pool global (pedido do PO, estava bloqueado até o Carro 2 pontuar de verdade — **desbloqueado na sessão 14**, ainda não implementado) · Racing engineer/lead mechanic/pit crew/marketing team (outros cargos do CLAUDE.md "Extra — Cargos contratáveis", fora de escopo do E-302, que cobriu só o piloto do Carro 2) · Skill `marketing` do piloto sem efeito de jogo ainda (poderia conectar com o sistema de patrocinadores, não conectado de propósito nesta sessão — ver `Claude-Manager.md` §5 item 10).
 
 ## 9. Riscos técnicos e mitigações
 
@@ -221,22 +229,25 @@ Restam: E-302 Pilotos e equipe/staff (efeitos no RaceInput: pitCrewQuality, dev.
 
 ## 11. Próximos passos imediatos
 
-**Atualizado 2026-07-21 (sessão 13 da trilha Racing — rodada grande, autorizada pelo PO a avançar sem interrupção pelas 3 trilhas + revisão de documentação).** Estado macro do projeto neste ponto:
+**Atualizado 2026-07-21 (sessão 14 — PO autorizou avançar sem interrupção sobre uma lista combinada das trilhas Racing + Manager).** Estado macro do projeto neste ponto:
 
 **O que está resolvido/entregue e não precisa de ação:**
-- M2 inteiro (E-201 a E-207) + E-301 (Sede/escritórios, adiantado do M3+) — ver seção 8.
-- Unificação core/grid (era a prioridade #1 registrada nesta seção há algumas sessões) — feita, dívida técnica fechada.
+- M2 inteiro (E-201 a E-207) + E-301/E-302/E-303/E-305 (adiantados do M3+) — ver seção 8.
+- Unificação core/grid — feita, dívida técnica fechada.
 - Bug de DNF mostrando posição "ao vivo" sem sentido (reportado pelo PO) — corrigido: DNF agora classifica em último lugar sempre.
-- Tela de instrução (TutorialScene) e tempo de volta (pedidos do PO) — entregues.
-- Todos os 8 conceitos de boost do CLAUDE.md §6.1 — implementados (os últimos 2, rasante e fôlego de ultrapassagem, na sessão 13).
+- Todos os 8 conceitos de boost do CLAUDE.md §6.1 — implementados.
+- Ultrapassagem (piso de dificuldade + bônus de sucesso) e largada (cursor mais lento + zona própria) redesenhadas a pedido do PO — ver `Claude-Racing.md` §2.32.
+- Pilotos + Carro 2 pontuando, patrocinadores da livery + escritório de marketing, Loja/baús + Aura — os 3 épicos M3+ que faltavam do "pacote de tarefas" pedido pelo PO na sessão 13 — ver `Claude-Manager.md` §2.11.
 
 **Precisa de ação/decisão do PO (nesta ordem de urgência):**
-1. **Validar a rodada de calibração agressiva de dificuldade.** A pedido explícito do PO ("pode pegar pesado, pra eu validar o limite"), `ZONE_BASE_HALVES.purple` e `HEALTH_DIFFICULTY_FLOOR` foram para valores propositalmente exagerados (zona roxa bem mais estreita; zona chega a encolher até 80% com saúde baixa) — **não são a calibração final**, são uma sondagem de limite. Precisa jogar de novo e dizer se passou do ponto (provavelmente sim, de propósito) pra eu recuar pro valor certo. Ver Claude-Racing.md, seção de pendências mais recente.
+1. **Validar em playtest o redesign de ultrapassagem e largada (sessão 14).** Piso mínimo de dificuldade + bônus de 30% no sucesso da ultrapassagem, cursor de largada mais lento + zona própria mais estreita — implementados e testados tecnicamente, mas são parâmetros de "feel" que só um humano jogando valida. Ver `Claude-Racing.md` §3 (pendências mais recentes).
 2. **Confirmar se o token de push do GitHub (colado em texto puro no chat, sessão 3) foi revogado/rotacionado.** Pendência de segurança em aberto há várias sessões, nunca confirmada — não é algo que um agente resolve sozinho, precisa da ação do PO no GitHub.
 3. **Testers substitutos / soft-launch:** conforme decisão de 2026-07-21 (seção 3), o PO ia tentar achar testers fora do círculo dos irmãos em paralelo — sem atualização de resultado registrada ainda.
+4. **Calibrar `AVAILABLE_PILOTS`/`AVAILABLE_SPONSORS`/`CHESTS` (sessão 14) com dado real** — são propostas iniciais do TechLead-Manager (custo, bônus, chances de raridade), sem passar pelo `economyHarness` ainda. Ver `Claude-Manager.md` §5 item 9.
 
 **Trabalho técnico pendente, não bloqueante (ordem sugerida, não urgente):**
-- 2ª pista real (E-307) — a skill `track-layout` já existe; só falta uma sessão dedicada com uma referência real (imagem/SVG oficial do circuito escolhido).
-- Sistema de patrocinadores da livery (modal de 6 posições, CLAUDE.md §5) — precisa de sessão própria pra desenhar do zero; destrava o escritório de marketing que ficou de fora do E-301.
-- Peças equipáveis por carro (não só um pool global) — pedido do PO, deliberadamente adiado até o Carro 2 (E-303) existir de verdade.
+- 2ª pista real (E-307) + 1º campeonato de 2 corridas (E-304) — ambos deliberadamente adiados pelo PO na sessão 14 pro "próximo pacote de tarefas", condicionados a existir uma referência real (imagem/SVG oficial) do próximo circuito.
+- Peças equipáveis por carro (não só um pool global) — pedido do PO, estava bloqueado até o Carro 2 (E-303) pontuar de verdade; **desbloqueado na sessão 14**, ainda não implementado.
 - Calibração fina do `PLAYER_GRID_PACE_SCALE` (Temerário na borda da meta de DNF) e do `CHALLENGE_PREP_MS` (600ms, nunca testado por um humano além do julgamento técnico) — ambos aguardando confirmação de playtest, sem sinal de que estejam errados.
+- Pista de Spa temporariamente em 4 voltas (sessão 14, pedido do PO pra ciclo de teste mais rápido) — quando voltar a 8 voltas (tamanho de design definitivo), reconferir os números de DNF do `botHarness`, que caíram só por menor exposição a eventos.
+- Skill `marketing` do piloto (E-302) sem efeito de jogo ainda — poderia conectar com o sistema de patrocinadores (sessão 14), não conectado de propósito. Ver `Claude-Manager.md` §5 item 10.
