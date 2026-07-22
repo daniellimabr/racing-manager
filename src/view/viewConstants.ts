@@ -39,13 +39,31 @@ export const RAMP_DURATION_MS = 1300;
 export const ACCEL_CENTER = 75;
 export const BRAKE_CENTER = 50;
 
-/** Largada: agora é "segurar para controlar" a agulha até o sinal, não mais um toque de reação. */
+/**
+ * Largada: "segurar para controlar" a agulha até o sinal, não um toque de
+ * reação. Velocidade reduzida na sessão 14 (pedido do PO: "o cursor tem uma
+ * velocidade alta demais... um pouco mais lenta, um pouco elástica pra
+ * conseguir manter o cursor dentro do roxo") — 0.16/0.10 → 0.10/0.065
+ * (~35-40% mais lento), preservando a proporção subida:descida. "Elástica"
+ * não virou física de mola de verdade nesta sessão — só desacelerado; o PO já
+ * sinalizou que este mecanismo inteiro vai passar por um revamp quando a
+ * Trilha 3 (UI/FX) entrar, então física de mola de verdade fica pra lá.
+ */
 export const LARGADA_PREP_MS = 1500;
 export const LARGADA_LIGHT_INTERVAL_MS = 500;
 export const LARGADA_HOLD_MIN_MS = 300;
 export const LARGADA_HOLD_MAX_MS = 700;
-export const LARGADA_HOLD_RATE = 0.16; // unidades/ms subindo enquanto segura
-export const LARGADA_FALL_RATE = 0.10; // unidades/ms caindo quando solta
+export const LARGADA_HOLD_RATE = 0.10; // unidades/ms subindo enquanto segura
+export const LARGADA_FALL_RATE = 0.065; // unidades/ms caindo quando solta
+
+/**
+ * Compensa o cursor mais lento/controlável: zona roxa/verde só da largada
+ * fica mais estreita que o resto do jogo (ZONE_BASE_HALVES, core/constants.ts
+ * — compartilhado por frenagem/aceleração/pit, que o PO já confirmou estar na
+ * medida certa e não deve ser tocado). Multiplica a escala calculada por
+ * `computeScale()` só na largada, ver `startTimingChallenge` (RaceScene.ts).
+ */
+export const LARGADA_ZONE_SCALE = 0.7;
 /** duração da animação dos carros entre eventos (T-104: 0,8–1,2s por trecho) */
 export const TWEEN_DURATION_MS = 1000;
 

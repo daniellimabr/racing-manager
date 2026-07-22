@@ -9,7 +9,7 @@ import {
   GAIN, DAMAGE, NITRO_GOOD_BONUS, NITRO_BAD_RELIEF,
   REPAIR_BOOST_AMOUNT, ERROR_RECOVERY_RELIEF, PLAYER_GRID_PACE_SCALE,
   MISS_INSTANT_DNF_CHANCE_MIN, MISS_INSTANT_DNF_CHANCE_MAX, GOLD_CRASH_PENALTY,
-  NOMINAL_LAP_SECONDS, RASANTE_BOOST_SCALE,
+  NOMINAL_LAP_SECONDS, RASANTE_BOOST_SCALE, OVERTAKE_SUCCESS_GAIN_BONUS,
 } from './constants.js';
 
 /**
@@ -152,6 +152,14 @@ export function resolveCurrent(state: RaceState, tier: Tier, opts: ResolveOption
   if (isSaida && gain >= 0 && state.pendingBoost === 'rasante') {
     gain *= RASANTE_BOOST_SCALE;
     state.pendingBoost = null;
+  }
+  // Revisão da ultrapassagem (sessão 14, pedido do PO): sucesso tentando
+  // ultrapassar agora rende mais ganho que o mesmo resultado sem tentar —
+  // "o benefício deve ser maior que não tentar, mas uma manobra perfeita não
+  // deveria fazer o jogador perder tempo". Só reforça ganho positivo, nunca
+  // piora um resultado ruim (mesmo espírito assimétrico do nitro/rasante).
+  if (!isSaida && ev.kind !== 'pit' && gain > 0 && state.overtakeAttempt) {
+    gain *= OVERTAKE_SUCCESS_GAIN_BONUS;
   }
   if (isSaida) gain *= 0.5;
 

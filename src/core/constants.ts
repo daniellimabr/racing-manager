@@ -172,6 +172,30 @@ export const RASANTE_BOOST_SCALE = 1.25; // +25% no ganho da saída em que foi e
 export const FOLEGO_THRESHOLD_SCALE = 1.5; // limiar de 1,0s vira 1,5s enquanto pendente
 
 export const OVERTAKE_GAP_THRESHOLD = 1.0; // segundos — só pode tentar ultrapassar abaixo disso
+
+/**
+ * Revisão do design da ultrapassagem (sessão 14, pedido do PO): tentar
+ * ultrapassagem precisa ter um piso mínimo de dificuldade extra, mesmo com o
+ * carro da frente bem perto — hoje (`computeScale`, core/timing.ts), com gap
+ * ≈ 0 a dificuldade extra cai a quase zero, igual a não tentar. `closeness`
+ * passa a ser interpolado entre este piso e 1 (gap no limiar), em vez de ir
+ * de 0 a 1 puro.
+ */
+export const OVERTAKE_MIN_CLOSENESS = 0.2;
+
+/**
+ * Revisão do design da ultrapassagem (sessão 14, pedido do PO): "o benefício
+ * em tempo relativo ao carro à frente deve ser maior do que não tentar, mas
+ * uma manobra perfeita não deveria fazer o jogador perder tempo em relação
+ * ao grid ou ao tempo de volta". Bônus multiplicativo no `gain`, só quando
+ * positivo (mesmo espírito assimétrico do nitro/rasante — nunca piora um
+ * resultado ruim, só potencializa um bom). Antes desta sessão, tentar
+ * ultrapassagem só aumentava a dificuldade (zona mais estreita) sem
+ * nenhuma recompensa extra em caso de sucesso — decisão consciente da sessão
+ * 9 (Claude-Racing.md §2.25), revertida agora a pedido do PO depois de
+ * sentir a mecânica "inútil" na prática.
+ */
+export const OVERTAKE_SUCCESS_GAIN_BONUS = 1.3; // +30% no ganho, se positivo e tentando ultrapassagem
 export const PIT_SCALE = 1.3; // equipe de pit stop alarga a zona
 export const PNEU_BOOST_SCALE = 1.2;
 export const MAX_SCALE = 1.5;

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { tierFromPosition, zoneHalves, computeScale, canAttemptOvertake, combineTiers } from '../src/core/timing.js';
-import { HEALTH_DIFFICULTY_FLOOR } from '../src/core/constants.js';
+import { HEALTH_DIFFICULTY_FLOOR, OVERTAKE_MIN_CLOSENESS } from '../src/core/constants.js';
 
 describe('tierFromPosition', () => {
   const halves = zoneHalves(1);
@@ -52,14 +52,17 @@ describe('computeScale', () => {
     expect(s).toBeGreaterThan(1);
   });
 
-  it('tentar ultrapassar com gap próximo de 0 quase não penaliza', () => {
-    const s = computeScale({ base: 1, isPit: false, isSaida: false, overtakeAttempt: true, gap: 0.02, pendingBoostIsPneu: false });
-    expect(s).toBeGreaterThan(0.95);
+  it('tentar ultrapassar sempre tem um piso mínimo de dificuldade extra, mesmo com gap ≈ 0 (sessão 14, pedido do PO)', () => {
+    const s = computeScale({ base: 1, isPit: false, isSaida: false, overtakeAttempt: true, gap: 0.001, pendingBoostIsPneu: false });
+    expect(s).toBeLessThan(1); // sempre mais difícil que não tentar, nunca "de graça"
+    expect(s).toBeCloseTo(1 - 0.5 * OVERTAKE_MIN_CLOSENESS, 2); // perto do piso mínimo
   });
 
-  it('tentar ultrapassar com gap próximo do limite (1s) é bem mais difícil', () => {
-    const s = computeScale({ base: 1, isPit: false, isSaida: false, overtakeAttempt: true, gap: 0.99, pendingBoostIsPneu: false });
-    expect(s).toBeLessThan(0.55);
+  it('tentar ultrapassar com gap próximo do limite (1s) é bem mais difícil que com gap ≈ 0', () => {
+    const close = computeScale({ base: 1, isPit: false, isSaida: false, overtakeAttempt: true, gap: 0.001, pendingBoostIsPneu: false });
+    const far = computeScale({ base: 1, isPit: false, isSaida: false, overtakeAttempt: true, gap: 0.99, pendingBoostIsPneu: false });
+    expect(far).toBeLessThan(close);
+    expect(far).toBeLessThan(0.55);
   });
 
   it('nunca ultrapassa o teto de escala (MAX_SCALE)', () => {

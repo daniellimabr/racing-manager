@@ -1,9 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { createRace, currentEvent, resolveCurrent, advance, revive, tryUseNitro, toRaceOutput, applyBoost, raceStandings } from '../src/core/raceState.js';
+import {
+  createRace, currentEvent, resolveCurrent, advance, revive, tryUseNitro, toRaceOutput, applyBoost, raceStandings,
+  setOvertakeAttempt,
+} from '../src/core/raceState.js';
 import {
   REPAIR_BOOST_AMOUNT, DAMAGE, GAIN, GOLD_CRASH_PENALTY, PLAYER_GRID_PACE_SCALE,
   MISS_INSTANT_DNF_CHANCE_MIN, MISS_INSTANT_DNF_CHANCE_MAX, NOMINAL_LAP_SECONDS,
-  RASANTE_BOOST_SCALE,
+  RASANTE_BOOST_SCALE, OVERTAKE_SUCCESS_GAIN_BONUS,
 } from '../src/core/constants.js';
 import type { TrackDef, CarSetup, RaceState } from '../src/core/types.js';
 
@@ -224,6 +227,43 @@ describe('classificação de DNF + staleness de position (sessão 13, bug report
     const live = raceStandings(s).find((x) => x.isPlayer)!.position;
     expect(output.dnf).toBe(false);
     expect(output.position).toBe(live);
+  });
+});
+
+describe('ultrapassagem — bônus de ganho no sucesso (sessão 14, pedido do PO)', () => {
+  it('tentar ultrapassagem e acertar rende mais ganho que o mesmo resultado sem tentar', () => {
+    const s1 = createRace(track, setup);
+    advance(s1); // 1ª frenagem
+    const withoutAttempt = resolveCurrent(s1, 'purple', { nitroUsed: false });
+
+    const s2 = createRace(track, setup);
+    advance(s2);
+    setOvertakeAttempt(s2, true);
+    const withAttempt = resolveCurrent(s2, 'purple', { nitroUsed: false });
+
+    expect(withAttempt.gainSeconds).toBeCloseTo(withoutAttempt.gainSeconds * OVERTAKE_SUCCESS_GAIN_BONUS, 5);
+  });
+
+  it('tentar ultrapassagem e errar não piora o resultado (bônus só em ganho positivo)', () => {
+    const s = createRace(track, setup);
+    advance(s);
+    setOvertakeAttempt(s, true);
+    const r = resolveCurrent(s, 'miss', { nitroUsed: false });
+    expect(r.gainSeconds).toBeCloseTo(GAIN.miss, 5); // sem multiplicador nenhum
+  });
+
+  it('não tentar ultrapassagem não recebe o bônus', () => {
+    const s = createRace(track, setup);
+    advance(s);
+    const r = resolveCurrent(s, 'purple', { nitroUsed: false });
+    expect(r.gainSeconds).toBeCloseTo(GAIN.purple, 5);
+  });
+
+  it('o bônus não se aplica na saída (só frenagem/pit)', () => {
+    const s = createRace(track, setup); // currentEvent é a largada (saída)
+    setOvertakeAttempt(s, true); // não deveria ter efeito nenhum aqui (saída nunca oferece ultrapassagem na UI, mas o core não deve aplicar o bônus mesmo assim)
+    const r = resolveCurrent(s, 'purple', { nitroUsed: false });
+    expect(r.gainSeconds).toBeCloseTo(GAIN.purple * 0.5, 5); // só o meio-ganho de saída, sem bônus
   });
 });
 

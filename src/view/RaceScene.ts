@@ -15,7 +15,7 @@ import {
   DEFAULT_CAR_SETUP, DEFAULT_PIT_CREW_QUALITY,
   RAMP_DURATION_MS, ACCEL_CENTER, BRAKE_CENTER, JANELA_DURATION_SCALE,
   LARGADA_PREP_MS, LARGADA_LIGHT_INTERVAL_MS, LARGADA_HOLD_MIN_MS, LARGADA_HOLD_MAX_MS,
-  LARGADA_HOLD_RATE, LARGADA_FALL_RATE,
+  LARGADA_HOLD_RATE, LARGADA_FALL_RATE, LARGADA_ZONE_SCALE,
 } from './viewConstants.js';
 import { track as trackEvent } from '../telemetry/analytics.js';
 import { juice } from './juice.js';
@@ -628,9 +628,13 @@ export class RaceScene extends Phaser.Scene {
       pitCrewQuality: DEFAULT_PIT_CREW_QUALITY,
       healthFraction: this.raceState.health / this.raceState.healthMax,
     });
-    this.challengeHalves = zoneHalves(scale);
-
     const isLargada = isSaida && ev.cornerName === 'Largada';
+    // Cursor da largada ficou mais lento/controlável (sessão 14, pedido do
+    // PO) — compensado com zona roxa/verde mais estreita só aqui, sem tocar
+    // no ZONE_BASE_HALVES global (compartilhado com frenagem/aceleração/pit,
+    // que o PO já confirmou estarem na medida certa).
+    this.challengeHalves = zoneHalves(isLargada ? scale * LARGADA_ZONE_SCALE : scale);
+
     if (isLargada) {
       this.startLargadaChallenge();
       return;

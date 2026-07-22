@@ -1,8 +1,8 @@
 {
   "id": "spa",
   "name": "Spa-Francorchamps",
-  "laps": 8,
-  "pitAfterLap": 4,
+  "laps": 4,
+  "pitAfterLap": 3,
   "pitPathIndex": 19,
   "path": [
     { "x": 0.21, "y": 0.92 },

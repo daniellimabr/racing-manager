@@ -1,6 +1,7 @@
 import type { Tier } from './types.js';
 import {
   ZONE_BASE_HALVES, MAX_SCALE, OVERTAKE_GAP_THRESHOLD, PNEU_BOOST_SCALE, HEALTH_DIFFICULTY_FLOOR, PIT_SCALE,
+  OVERTAKE_MIN_CLOSENESS,
 } from './constants.js';
 
 export interface ZoneHalves {
@@ -70,7 +71,13 @@ export function computeScale(opts: ScaleOptions): number {
     scale *= PIT_SCALE + (opts.pitCrewQuality ?? 0) * 0.3; // equipe melhor = zona ainda mais larga
   }
   if (!opts.isSaida && !opts.isPit && opts.overtakeAttempt) {
-    const closeness = Math.min(1, Math.abs(opts.gap) / OVERTAKE_GAP_THRESHOLD);
+    // Revisão da sessão 14 (pedido do PO): tentar ultrapassagem precisa ser
+    // sempre mais difícil que não tentar, mesmo com o carro da frente colado
+    // (gap ≈ 0) — antes, `closeness` ia de 0 a 1 puro, e com gap ≈ 0 a
+    // dificuldade extra praticamente desaparecia. Agora interpola entre
+    // OVERTAKE_MIN_CLOSENESS (piso, gap ≈ 0) e 1 (gap no limiar).
+    const rawCloseness = Math.min(1, Math.abs(opts.gap) / OVERTAKE_GAP_THRESHOLD);
+    const closeness = OVERTAKE_MIN_CLOSENESS + (1 - OVERTAKE_MIN_CLOSENESS) * rawCloseness;
     scale *= 1 - 0.5 * closeness;
   }
   if (!opts.isSaida && opts.pendingBoostIsPneu) {
