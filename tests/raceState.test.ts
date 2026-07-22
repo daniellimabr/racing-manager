@@ -52,7 +52,25 @@ describe('resolveCurrent — gap e posição (unificadas com o grid, sessão 11)
   it('resultado perfeito reduz o gap mas também desgasta a saúde (decisão do PO, Claude-Racing.md §2.14)', () => {
     const s = createRace(track, setup);
     advance(s); // sai da largada, vai para 1ª frenagem
-    const before = s.gapToAhead;
+    // pinRival (não usado aqui originalmente): sem ele, `before` vem do grid
+    // de 11 IAs com RNG não seedado (`advance()` usa `Math.random` por
+    // padrão) — na maioria das vezes o carro da frente está longe o
+    // suficiente pra "ganhar 0.30s" só encolher o gap, mas ocasionalmente o
+    // sorteio coloca um rival tão perto que ganhar tempo ULTRAPASSA ele, e o
+    // "novo carro da frente" fica com um gap MAIOR que `before` — falha
+    // esporádica pega pelo CI (Linux/sequência de Math.random diferente da
+    // máquina local), não uma regressão de código. Corrigido plantando um
+    // rival bem longe (mesmo padrão já usado nos 2 testes abaixo), tornando
+    // o cenário 100% determinístico.
+    pinRival(s, 'alpha-1', -2.0); // rival bem à frente — ganhar 0.30s não chega a ultrapassar
+    // `pinRival` só atualiza `grid.cumulativeTime`/`s.position` — `s.gapToAhead`
+    // continua com o valor stale de antes do pin (só é recalculado dentro de
+    // `resolveCurrent`), então precisa ser recomputado aqui do mesmo jeito
+    // que `computeGapToAhead` (não exportado) faz internamente.
+    const standingsBefore = raceStandings(s);
+    const playerBefore = standingsBefore.find((x) => x.isPlayer)!;
+    const aheadBefore = standingsBefore.find((x) => x.position === playerBefore.position - 1);
+    const before = aheadBefore ? playerBefore.gapToLeader - aheadBefore.gapToLeader : 0;
     const r = resolveCurrent(s, 'purple', { nitroUsed: false });
     expect(s.gapToAhead).toBeLessThan(before);
     expect(r.damage).toBeGreaterThan(0);
