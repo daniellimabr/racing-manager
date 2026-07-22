@@ -7,7 +7,13 @@ import { NOMINAL_LAP_SECONDS } from '../core/constants.js';
 export const CANVAS_WIDTH = 480;
 export const CANVAS_HEIGHT = 800;
 
-export const HUD_HEIGHT = 78;
+/**
+ * 78 → 108 na sessão 15: nova linha dedicada aos toggles persistentes de
+ * ultrapassagem/nitro (`buildToggleButtons`, RaceScene.ts), que substituíram
+ * as telas de decisão bloqueantes — precisa de um espaço fixo próprio, sem
+ * disputar lugar com o texto de posição/volta/gap já existente.
+ */
+export const HUD_HEIGHT = 108;
 export const PANEL_HEIGHT = 220;
 export const TRACK_RECT = {
   x: 10,
@@ -26,13 +32,20 @@ export const TRACK_RECT = {
 export const CURSOR_SWEEP_PERIOD_MS = 700;
 /** tempo limite (ms) para apertar o botão antes de contar como "miss" automático — usado só no pit */
 export const CHALLENGE_TIME_LIMIT_MS = 1500;
+
 /**
- * Tempo limite (ms) pra decidir ultrapassagem/nitro antes do desafio de timing.
- * Expirando, assume "não" e o jogo segue — feedback de playtest do PO: a tela
- * de decisão pausava indefinidamente, diferente do resto do jogo, que sempre
- * tem pressão de tempo (Claude-Racing.md §2.22).
+ * ~~PRE_CHALLENGE_TIME_LIMIT_MS~~ — REMOVIDA na sessão 15. Era o timeout da
+ * tela de decisão bloqueante de ultrapassagem/nitro (3000ms, expira -> "não"),
+ * que passou a existir por causa do bug registrado em Claude-Racing.md §2.22
+ * ("a tela de decisão pausava indefinidamente"). Essa tela em si não existe
+ * mais — ultrapassagem/nitro viraram toggle-buttons persistentes no HUD
+ * (`overtakeToggleOn`/`nitroToggleOn`, RaceScene.ts), sempre disponíveis, sem
+ * nenhuma decisão bloqueante a resolver — o problema que este timeout
+ * corrigia deixou de existir pela raiz, não só o sintoma. Também era, em
+ * parte, a causa de o "bullet time" ligar cedo demais e durar longo demais
+ * (pedido do PO nesta sessão): o carro desacelerava assim que a tela de
+ * decisão aparecia, bem antes do desafio de timing em si começar.
  */
-export const PRE_CHALLENGE_TIME_LIMIT_MS = 3000;
 
 /**
  * T-105 (proposta CSR2, validada na demo greybox — ver Claude-Racing.md §2.10):
@@ -113,8 +126,18 @@ export const TWEEN_DURATION_MS = 1000;
  * Os outros 11 carros do grid continuam posicionados por deslocamento de gap
  * em relação a essa mesma referência contínua do jogador (mesmo modelo de
  * sempre) — o pelotão inteiro "anda junto" com o crawl do jogador.
+ *
+ * Recalibrado na mesma sessão, 2ª rodada de feedback do PO: com as telas de
+ * decisão de ultrapassagem/nitro removidas (viraram toggles — ver
+ * PRE_CHALLENGE_TIME_LIMIT_MS acima), o tempo em velocidade normal antes do
+ * bullet time ligar ficou bem mais curto e prévisível (~1,7s: banner de
+ * resultado + pausa de ritmo, `TWEEN_DURATION_MS`). "Os carros dão um dash
+ * muito rápido" — 0,00005 cruzava uma perna típica em ~1s, chegando ANTES do
+ * bullet time começar e ficando parado esperando; reduzido pra 0,00003
+ * (~1,7s por perna típica) pra terminar de chegar bem na hora em que o
+ * bullet time assume, sem sobra de tempo parado nem chegada "correndo".
  */
-export const NORMAL_LEG_SPEED_T_PER_MS = 0.00005; // ~1s pra cruzar uma perna típica de Spa (~5% da volta) em velocidade normal — comparável ao antigo TWEEN_DURATION_MS fixo
+export const NORMAL_LEG_SPEED_T_PER_MS = 0.00003;
 /** Quanto maior, mais lento o "bullet time" (divide a velocidade normal de avanço durante a decisão/desafio ativo). */
 export const BULLET_TIME_SLOWDOWN = 10;
 /** Fração máxima da distância até o próximo evento que o avanço contínuo pode cobrir antes de `advance()` commitar a transição (nunca chega a 100%, evita "ultrapassar" visualmente um evento ainda não resolvido). */

@@ -10,7 +10,7 @@ import type { GridStanding, TeammateProfile } from '../core/grid.js';
 import { normalizedToScreen, pathIndexToT, pointAtT } from './pathUtils.js';
 import {
   TRACK_RECT, CANVAS_WIDTH, CANVAS_HEIGHT, HUD_HEIGHT, PANEL_HEIGHT,
-  CURSOR_SWEEP_PERIOD_MS, CHALLENGE_TIME_LIMIT_MS, PRE_CHALLENGE_TIME_LIMIT_MS, TWEEN_DURATION_MS, CHALLENGE_PREP_MS,
+  CURSOR_SWEEP_PERIOD_MS, CHALLENGE_TIME_LIMIT_MS, TWEEN_DURATION_MS, CHALLENGE_PREP_MS,
   SECONDS_PER_LAP_VISUAL, MAX_VISUAL_GAP_SECONDS, TIER_COLORS, BOOST_LABELS, BOOST_DESCRIPTIONS, TEAM_COLORS,
   DEFAULT_CAR_SETUP, DEFAULT_PIT_CREW_QUALITY,
   RAMP_DURATION_MS, ACCEL_CENTER, BRAKE_CENTER, JANELA_DURATION_SCALE,
@@ -122,7 +122,6 @@ export class RaceScene extends Phaser.Scene {
   private cursorGraphics!: Phaser.GameObjects.Graphics;
   private challengeTimer?: Phaser.Time.TimerEvent;
   private challengePrepTimer?: Phaser.Time.TimerEvent;
-  private preChallengeTimer?: Phaser.Time.TimerEvent;
   private pendingNitro = false;
   private pitAnnounced = false;
   private raceStartTime = 0;
@@ -140,11 +139,39 @@ export class RaceScene extends Phaser.Scene {
   private visualPlayerT = 0;
   private visualPlayerTInitialized = false;
 
+  /**
+   * Snapshot do `gapToLeader` do jogador usado pra posicionar os OUTROS 11
+   * carros (deslocamento relativo, ver `tickVisualPositions`). Bug real
+   * reportado pelo PO na sessão 15 ("os carros dão um pequeno passo atrás
+   * antes de seguir à frente"): `resolveCurrent()` já muda `raceProgress`
+   * (e portanto o gap do jogador) na hora, bem antes de `advance()` rodar —
+   * como `tickVisualPositions` roda todo frame, ler o gap AO VIVO durante o
+   * banner de resultado fazia os outros carros recalcularem sua posição
+   * relativa contra um `refT` que ainda não tinha se movido, um instante
+   * antes do refT alcançar, lido como um "passo atrás". Congelando o gap até
+   * `advance()` rodar (mesmo instante em que `refT`/curT também mudam),
+   * ambos os lados andam sempre em sincronia — igual ao comportamento de
+   * antes desta sessão (quando a posição só era recalculada 1x por evento).
+   */
+  private frozenPlayerGapToLeader = 0;
+
   // Pausa (sessão 15): botão no HUD abre um modal com "Continuar"/"Desistir".
   private paused = false;
   private pauseStartedAt = 0;
   private pauseOverlay?: Phaser.GameObjects.Container;
   private pauseButtonContainer?: Phaser.GameObjects.Container;
+
+  // Toggles persistentes de ultrapassagem/nitro (sessão 15, pedido do PO):
+  // substituem as antigas telas de decisão bloqueantes — o jogador liga/
+  // desliga a qualquer momento, e a intenção só é aplicada de fato quando a
+  // condição permite (ver showPreChallenge/updateToggleVisuals).
+  private overtakeToggleOn = false;
+  private nitroToggleOn = false;
+  private toggleRowContainer?: Phaser.GameObjects.Container;
+  private overtakeToggleBg?: Phaser.GameObjects.Rectangle;
+  private overtakeToggleText?: Phaser.GameObjects.Text;
+  private nitroToggleBg?: Phaser.GameObjects.Rectangle;
+  private nitroToggleText?: Phaser.GameObjects.Text;
 
   // E-202 (Manager, M2): recompensa da corrida atual, calculada 1x em showSummary()
   private lastReward: RaceRewardResult | null = null;
@@ -199,10 +226,14 @@ export class RaceScene extends Phaser.Scene {
     this.paused = false;
     this.pauseOverlay = undefined;
     this.visualPlayerTInitialized = false;
+    this.overtakeToggleOn = false;
+    this.nitroToggleOn = false;
     trackEvent('race_start', { trackId: track.id });
 
+    this.refreshFrozenGap();
     this.buildHud();
     this.buildPauseButton();
+    this.buildToggleButtons();
 
     this.trackGraphics = this.add.graphics();
     this.drawTrack();
@@ -372,6 +403,12 @@ export class RaceScene extends Phaser.Scene {
     return this.visualPlayerT;
   }
 
+  /** Atualiza o snapshot de `frozenPlayerGapToLeader` — ver o comentário do campo. */
+  private refreshFrozenGap(): void {
+    const standings = this.currentStandings();
+    this.frozenPlayerGapToLeader = standings.find((x) => x.isPlayer)?.gapToLeader ?? 0;
+  }
+
   /**
    * Posiciona todos os ícones do grid a partir da referência contínua do
    * jogador (`advancePlayerRefT`) + gap — o pelotão inteiro anda junto com o
@@ -389,7 +426,6 @@ export class RaceScene extends Phaser.Scene {
     // `gapToLeader` bruto — senão o líder (gapToLeader = 0) cai exatamente em
     // cima de `refT`, ou seja, em cima do próprio jogador, ficando mais errado
     // quanto maior o gap do jogador (bug reportado em playtest, Claude-Racing.md §2.22).
-    const playerGapToLeader = standings.find((x) => x.isPlayer)?.gapToLeader ?? 0;
     const factor = dtMs > 0 ? 1 - Math.pow(0.5, dtMs / VISUAL_CATCHUP_HALFLIFE_MS) : 0;
 
     for (const standing of standings) {
@@ -403,7 +439,7 @@ export class RaceScene extends Phaser.Scene {
       entry.circle.setFillStyle(this.iconColor(standing));
       entry.label.setText(String(standing.position));
 
-      const gapToPlayer = standing.gapToLeader - playerGapToLeader;
+      const gapToPlayer = standing.gapToLeader - this.frozenPlayerGapToLeader;
       const clampedGap = Math.max(-MAX_VISUAL_GAP_SECONDS, Math.min(MAX_VISUAL_GAP_SECONDS, gapToPlayer));
       const targetT = refT - clampedGap / SECONDS_PER_LAP_VISUAL;
 
@@ -427,10 +463,13 @@ export class RaceScene extends Phaser.Scene {
     this.hudLapLabelText = this.add.text(76, 8, 'VOLTA', { fontSize: '10px', color: '#999999' });
     this.hudLapValueText = this.add.text(76, 20, '', { fontSize: '15px', color: '#ffffff', fontStyle: 'bold' });
 
-    this.hudGapText = this.add.text(CANVAS_WIDTH - 16, 6, '', {
+    // Ancorado CANVAS_WIDTH-42 (não -16): sessão 15, o botão de pausa moveu
+    // pro canto superior direito de vez (pedido do PO) e precisa da faixa
+    // mais externa (~38px) livre — ver buildPauseButton().
+    this.hudGapText = this.add.text(CANVAS_WIDTH - 42, 6, '', {
       fontSize: '20px', color: '#e74c3c', fontStyle: 'bold',
     }).setOrigin(1, 0);
-    this.hudGapTrendText = this.add.text(CANVAS_WIDTH - 16, 28, '', {
+    this.hudGapTrendText = this.add.text(CANVAS_WIDTH - 42, 28, '', {
       fontSize: '10px', color: '#8899aa',
     }).setOrigin(1, 0);
 
@@ -451,8 +490,20 @@ export class RaceScene extends Phaser.Scene {
     this.buildLeaderboardPanel();
   }
 
-  /** Painel lateral esquerdo com o gap ao líder de todos os 12 pilotos (não só o carro da frente). */
+  /**
+   * Painel lateral esquerdo com o gap ao líder de todos os 12 pilotos (não só o carro da frente).
+   * Bug real encontrado na sessão 15 (Playwright, causa raiz do "não consigo
+   * iniciar uma nova corrida"): `hudLeaderboardTexts` é um campo persistente
+   * da cena, e `create()` roda de novo a cada corrida — sem limpar o array
+   * primeiro, a 2ª corrida EMPILHAVA mais 12 textos em cima dos 12 antigos
+   * (já destruídos pelo Phaser ao sair da cena), e `updateLeaderboardPanel`
+   * lia os índices 0-11 (os objetos mortos) em vez dos novos, quebrando com
+   * `Cannot read properties of null (reading 'drawImage')` ao tentar
+   * `setColor()` num Text destruído — só na 2ª corrida em diante, nunca na 1ª.
+   */
   private buildLeaderboardPanel(): void {
+    this.hudLeaderboardTexts.forEach((t) => t.destroy());
+    this.hudLeaderboardTexts = [];
     const rowH = 14, padding = 4, gridSize = 12;
     const panelW = 112, panelH = rowH * gridSize + padding * 2;
     this.add.rectangle(0, HUD_HEIGHT, panelW, panelH, 0x000000, 0.5).setOrigin(0, 0);
@@ -466,22 +517,110 @@ export class RaceScene extends Phaser.Scene {
 
   /**
    * Botão de pausa (sessão 15, pedido do PO): abre um modal com "Continuar" e
-   * "Desistir da corrida" (DNF instantâneo por desistência). Fica no centro
-   * do topo do HUD — única faixa livre entre a posição/volta (esquerda) e o
-   * gap (direita).
+   * "Desistir da corrida" (DNF instantâneo por desistência). Movido pro canto
+   * superior direito nesta mesma sessão (2ª rodada de feedback) — o centro do
+   * topo passou a ser ocupado pela linha de toggles de ultrapassagem/nitro
+   * (ver buildToggleButtons). `hudGapText`/`hudGapTrendText` (buildHud) já
+   * ficam ancorados mais pra dentro (CANVAS_WIDTH-42) pra abrir espaço aqui.
    */
   private buildPauseButton(): void {
-    const w = 46, h = 28, x = CANVAS_WIDTH / 2 - w / 2, y = 6;
+    const w = 34, h = 26, x = CANVAS_WIDTH - w - 4, y = 4;
     const container = this.add.container(x, y).setDepth(900);
     const bg = this.add.rectangle(0, 0, w, h, 0x333640, 1).setOrigin(0, 0)
       .setStrokeStyle(1, 0x556677).setInteractive({ useHandCursor: true });
-    const text = this.add.text(w / 2, h / 2, 'II', { fontSize: '14px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
+    const text = this.add.text(w / 2, h / 2, 'II', { fontSize: '13px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
     bg.on('pointerdown', () => {
       juice.click();
       this.openPauseMenu();
     });
     container.add([bg, text]);
     this.pauseButtonContainer = container;
+  }
+
+  /**
+   * Toggles persistentes de ultrapassagem/nitro (sessão 15, pedido do PO):
+   * "deixá-los como toggle-buttons na tela, disponíveis para serem alterados
+   * todo o tempo, mas só seriam ativados se possível". Ficam numa linha
+   * dedicada no HUD (`HUD_HEIGHT` cresceu 78→108 só pra abrir esse espaço),
+   * sempre visíveis durante a corrida — ao contrário das antigas telas de
+   * decisão (showOvertakeStep/showNitroStep, removidas), não bloqueiam nada
+   * nem têm timeout: o jogador liga/desliga quando quiser, e a intenção só
+   * "pega" de verdade quando `showPreChallenge` checa a condição real
+   * (posição/gap pra ultrapassagem, carga disponível pro nitro).
+   */
+  private buildToggleButtons(): void {
+    const y = 82, h = 24, gap = 8;
+    const w = (CANVAS_WIDTH - 32 - gap) / 2;
+    const container = this.add.container(0, 0).setDepth(900);
+
+    const overtakeBg = this.add.rectangle(16, y, w, h, 0x455a64, 1).setOrigin(0, 0)
+      .setStrokeStyle(1, 0x66757f).setInteractive({ useHandCursor: true });
+    const overtakeText = this.add.text(16 + w / 2, y + h / 2, 'ULTRAPASSAGEM', {
+      fontSize: '11px', color: '#ffffff', fontStyle: 'bold',
+    }).setOrigin(0.5);
+    overtakeBg.on('pointerdown', () => {
+      juice.click();
+      this.overtakeToggleOn = !this.overtakeToggleOn;
+      this.updateToggleVisuals();
+    });
+
+    const nitroX = 16 + w + gap;
+    const nitroBg = this.add.rectangle(nitroX, y, w, h, 0x455a64, 1).setOrigin(0, 0)
+      .setStrokeStyle(1, 0x66757f).setInteractive({ useHandCursor: true });
+    const nitroText = this.add.text(nitroX + w / 2, y + h / 2, 'NITRO', {
+      fontSize: '11px', color: '#ffffff', fontStyle: 'bold',
+    }).setOrigin(0.5);
+    nitroBg.on('pointerdown', () => {
+      juice.click();
+      this.nitroToggleOn = !this.nitroToggleOn;
+      this.updateToggleVisuals();
+    });
+
+    container.add([overtakeBg, overtakeText, nitroBg, nitroText]);
+    this.toggleRowContainer = container;
+    this.overtakeToggleBg = overtakeBg;
+    this.overtakeToggleText = overtakeText;
+    this.nitroToggleBg = nitroBg;
+    this.nitroToggleText = nitroText;
+    this.updateToggleVisuals();
+  }
+
+  /**
+   * Reflete o estado real dos toggles (ligado/desligado × disponível/
+   * indisponível agora) — chamado de `updateHud()` (então atualiza a cada
+   * evento, incluindo quando o próprio clique no toggle já dispara na hora).
+   */
+  private updateToggleVisuals(): void {
+    if (!this.overtakeToggleBg || !this.nitroToggleBg) return;
+    const s = this.raceState;
+    const ev = !s.finished && !s.dnf ? currentEvent(s) : undefined;
+    const isSaida = ev?.kind === 'saida';
+    const isPit = ev?.kind === 'pit';
+    const overtakeThresholdScale = s.pendingBoost === 'folego_ultrapassagem' ? FOLEGO_THRESHOLD_SCALE : 1;
+    const canOvertakeNow = !!ev && !isSaida && !isPit && s.position > 1
+      && canAttemptOvertake(s.gapToAhead, overtakeThresholdScale);
+    const hasNitroNow = s.nitro > 0;
+
+    this.styleToggle(this.overtakeToggleBg, this.overtakeToggleText!, this.overtakeToggleOn, canOvertakeNow, 'ULTRAPASSAGEM');
+    const nitroLabelText = ev ? nitroLabel(ev).toUpperCase() : 'NITRO';
+    this.styleToggle(this.nitroToggleBg, this.nitroToggleText!, this.nitroToggleOn, hasNitroNow, nitroLabelText);
+  }
+
+  private styleToggle(
+    bg: Phaser.GameObjects.Rectangle, text: Phaser.GameObjects.Text, on: boolean, available: boolean, label: string
+  ): void {
+    text.setText(on ? `${label}: ON` : label);
+    if (on && available) {
+      bg.setFillStyle(0xff8a65);
+      text.setColor('#111111');
+    } else if (on) {
+      // ligado mas não disponível agora (ex.: sem nitro, ou longe demais pra ultrapassar) — "armado", esperando a condição.
+      bg.setFillStyle(0x6b4a3f);
+      text.setColor('#ddc2b8');
+    } else {
+      bg.setFillStyle(0x455a64);
+      text.setColor('#ffffff');
+    }
   }
 
   private openPauseMenu(): void {
@@ -509,6 +648,7 @@ export class RaceScene extends Phaser.Scene {
       this.paused = false;
       this.bulletTime = false;
       this.pauseButtonContainer?.setVisible(false);
+      this.toggleRowContainer?.setVisible(false);
       trackEvent('race_abandon', { trackId: track.id, lap: this.raceState.lap });
       abandonRace(this.raceState);
       this.showSummary(true);
@@ -583,6 +723,7 @@ export class RaceScene extends Phaser.Scene {
     }
 
     this.updateLeaderboardPanel(standings);
+    this.updateToggleVisuals();
   }
 
   private drawHudNitro(charges: number, total: number): void {
@@ -631,16 +772,19 @@ export class RaceScene extends Phaser.Scene {
     this.clearPanel();
     this.updateHud();
     this.pauseButtonContainer?.setVisible(true);
+    this.toggleRowContainer?.setVisible(true);
 
     if (this.raceState.dnf) {
       this.bulletTime = false;
       this.pauseButtonContainer?.setVisible(false);
+      this.toggleRowContainer?.setVisible(false);
       this.showDnfOverlay();
       return;
     }
     if (this.raceState.finished) {
       this.bulletTime = false;
       this.pauseButtonContainer?.setVisible(false);
+      this.toggleRowContainer?.setVisible(false);
       this.showSummary();
       return;
     }
@@ -694,11 +838,17 @@ export class RaceScene extends Phaser.Scene {
     this.time.delayedCall(900, () => this.showPreChallenge(ev));
   }
 
+  /**
+   * Sessão 15 (pedido do PO): ultrapassagem/nitro deixam de ser telas de
+   * decisão bloqueantes (com o próprio timeout) — agora são 2 toggle-buttons
+   * persistentes no HUD (`buildToggleButtons`/`updateToggleVisuals`), que o
+   * jogador liga/desliga a qualquer momento. Aqui só aplicamos a INTENÇÃO já
+   * armada (`overtakeToggleOn`/`nitroToggleOn`) se a condição de verdade
+   * permitir — sem isso, os carros ficavam "presos" numa tela de decisão
+   * bloqueante bem antes do desafio de timing de fato começar (motivo do
+   * bullet time entrar cedo demais — ver comentário de `startTimingChallenge`).
+   */
   private showPreChallenge(ev: RaceEvent): void {
-    // Bullet time (sessão 15): a partir daqui o jogador está decidindo/
-    // resolvendo o desafio deste evento — carros desaceleram (não param) até
-    // `resolveChallenge` desligar isto de novo.
-    this.bulletTime = true;
     const isSaida = ev.kind === 'saida';
     const isPit = ev.kind === 'pit';
     if (isPit && !this.pitAnnounced) {
@@ -719,70 +869,20 @@ export class RaceScene extends Phaser.Scene {
     const overtakeThresholdScale = this.raceState.pendingBoost === 'folego_ultrapassagem' ? FOLEGO_THRESHOLD_SCALE : 1;
     const canOvertake = !isSaida && !isPit && this.raceState.position > 1
       && canAttemptOvertake(this.raceState.gapToAhead, overtakeThresholdScale);
-    const hasNitro = this.raceState.nitro > 0;
-
-    if (!canOvertake && !hasNitro) {
-      this.startTimingChallenge(ev);
-      return;
-    }
-
-    this.pendingNitro = false;
-    if (canOvertake) {
-      this.showOvertakeStep(ev, hasNitro);
-    } else {
-      this.showNitroStep(ev);
-    }
-  }
-
-  /**
-   * Feedback de playtest do PO (Claude-Racing.md §2.22): o toggle de
-   * ultrapassagem pausava o jogo indefinidamente, diferente do resto do jogo
-   * (que sempre tem pressão de tempo). Agora são 2 botões diretos, com o
-   * mesmo timeout de decisão do nitro — expira, assume "não" e segue.
-   */
-  private showOvertakeStep(ev: RaceEvent, hasNitro: boolean): void {
-    this.clearPanel();
-    this.panel.add(this.add.text(16, 12, `${ev.cornerName ?? 'Largada'} — tentar ultrapassagem?`, {
-      fontSize: '14px', color: '#fff',
-    }));
-    const y = 48;
-    const gap = 8;
-    const halfW = (CANVAS_WIDTH - 32 - gap) / 2;
-    const decide = (attempt: boolean) => {
-      this.preChallengeTimer?.remove();
-      if (attempt) setOvertakeAttempt(this.raceState, true);
-      if (hasNitro) this.showNitroStep(ev);
-      else this.startTimingChallenge(ev);
-    };
-    this.panel.add(this.makeButton(16, y, halfW, 44, 'Ultrapassagem: SIM', 0xff8a65, () => decide(true)));
-    this.panel.add(this.makeButton(16 + halfW + gap, y, halfW, 44, 'Ultrapassagem: NÃO', 0x455a64, () => decide(false)));
-    this.preChallengeTimer = this.time.delayedCall(PRE_CHALLENGE_TIME_LIMIT_MS, () => decide(false));
-  }
-
-  private showNitroStep(ev: RaceEvent): void {
-    this.clearPanel();
-    // Feedback do PO: o toggle+confirmar do nitro não estava claro — 2 botões
-    // diretos (Sim/Não), cada um já define a opção e avança pro desafio.
-    // Nome contextual (KERS/Magic) — ver nitroLabel().
-    const label = nitroLabel(ev);
-    const nitroWord = this.raceState.nitro === 1 ? 'disponível' : 'disponíveis';
-    this.panel.add(this.add.text(16, 12, `Usar ${label}? (${this.raceState.nitro} ${nitroWord})`, {
-      fontSize: '13px', color: '#ccc',
-    }));
-    const y = 40;
-    const gap = 8;
-    const halfW = (CANVAS_WIDTH - 32 - gap) / 2;
-    const decide = (useNitro: boolean) => {
-      this.preChallengeTimer?.remove();
-      this.pendingNitro = useNitro;
-      this.startTimingChallenge(ev);
-    };
-    this.panel.add(this.makeButton(16, y, halfW, 44, `${label}: SIM`, 0x64b5f6, () => decide(true)));
-    this.panel.add(this.makeButton(16 + halfW + gap, y, halfW, 44, `${label}: NÃO`, 0x455a64, () => decide(false)));
-    this.preChallengeTimer = this.time.delayedCall(PRE_CHALLENGE_TIME_LIMIT_MS, () => decide(false));
+    if (this.overtakeToggleOn && canOvertake) setOvertakeAttempt(this.raceState, true);
+    this.pendingNitro = this.nitroToggleOn && this.raceState.nitro > 0;
+    this.startTimingChallenge(ev);
   }
 
   private startTimingChallenge(ev: RaceEvent): void {
+    // Bullet time (sessão 15, revisado): liga só aqui — bem quando o desafio
+    // de timing de fato começa a ser mostrado/lido (prep + cursor ativo) —
+    // não mais desde a decisão de ultrapassagem/nitro (que virou um toggle
+    // sempre disponível, sem tela própria — ver showPreChallenge). Feedback
+    // do PO: o tempo de decisão+interação era maior que o de viagem, e o
+    // "dash" rápido em velocidade normal chegava e ficava esperando parado.
+    // Desliga de novo no início de `resolveChallenge`.
+    this.bulletTime = true;
     const isSaida = ev.kind === 'saida';
     const isPit = ev.kind === 'pit';
     const scale = computeScale({
@@ -1107,6 +1207,9 @@ export class RaceScene extends Phaser.Scene {
     // `update()`) — não precisa mais disparar aqui; este delay é só um
     // respiro de ritmo antes de mostrar a próxima decisão.
     advance(this.raceState);
+    // Sincroniza o snapshot de gap dos outros carros com a MESMA transição
+    // (curT/refT também mudam agora) — ver comentário de `frozenPlayerGapToLeader`.
+    this.refreshFrozenGap();
     this.updateHud();
     this.time.delayedCall(TWEEN_DURATION_MS, () => this.startEventCycle());
   }
