@@ -6,9 +6,11 @@ import {
 } from '../core/economy.js';
 import { DEFAULT_CAR_SETUP } from '../core/constants.js';
 import { loadGame, spendEnergyForRace, type GameSave } from '../persistence/gameSave.js';
+import { currentChampionshipTrackId, isChampionshipComplete } from '../core/championship.js';
 import { findPilot, pilotTierWeights, pilotPaceFactor, pilotDevCarroBonus } from '../core/pilots.js';
 import type { TeammateProfile } from '../core/grid.js';
 import { CANVAS_WIDTH, CANVAS_HEIGHT } from './viewConstants.js';
+import { TRACKS } from './RaceScene.js';
 import { juice } from './juice.js';
 
 /**
@@ -62,6 +64,7 @@ export class HubScene extends Phaser.Scene {
     this.buildEnergyPanel();
     this.buildGoldPanel();
     this.buildPartsSummary();
+    this.buildChampionshipButton();
     this.buildRunButton();
 
     this.input.once('pointerdown', () => juice.unlock());
@@ -210,6 +213,37 @@ export class HubScene extends Phaser.Scene {
     this.partsSummaryText = this.add.text(16, 388, '', {
       fontSize: '11px', color: '#cccccc', lineSpacing: 4, fontFamily: 'monospace',
     });
+  }
+
+  /**
+   * Campeonato de construtores (sessão 15, pedido direto do PO) — leva pra
+   * `ChampionshipScene`, que trata os 3 estados (não iniciado/em andamento/
+   * encerrado). O rótulo aqui já dá uma prévia do estado sem precisar entrar.
+   * Fica no espaço livre entre o resumo de peças e o botão CORRER (que
+   * continua sendo a corrida avulsa em Spa, sem tocar no campeonato).
+   */
+  private buildChampionshipButton(): void {
+    const y = 560;
+    const w = CANVAS_WIDTH - 32, h = 48;
+    const bg = this.add.rectangle(16, y, w, h, 0x2a2e34).setOrigin(0, 0)
+      .setStrokeStyle(1, 0x64b5f6).setInteractive({ useHandCursor: true });
+    const label = this.championshipButtonLabel();
+    this.add.text(16 + w / 2, y + h / 2, label, {
+      fontSize: '13px', color: '#64b5f6', fontStyle: 'bold', align: 'center',
+    }).setOrigin(0.5);
+    bg.on('pointerdown', () => {
+      juice.click();
+      this.scene.start('ChampionshipScene');
+    });
+  }
+
+  private championshipButtonLabel(): string {
+    const champ = this.save.championship;
+    if (!champ) return 'CAMPEONATO — Iniciar (2 corridas)';
+    if (isChampionshipComplete(champ)) return 'CAMPEONATO — Encerrado, ver resultado';
+    const trackId = currentChampionshipTrackId(champ);
+    const trackName = trackId ? TRACKS[trackId].name : '';
+    return `CAMPEONATO — Corrida ${champ.raceIndex + 1}/2 (${trackName})`;
   }
 
   private buildRunButton(): void {

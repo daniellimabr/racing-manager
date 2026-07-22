@@ -4,9 +4,14 @@
  * (tracks/*.json) antes de investir na view de verdade (Sprint 2, T-101+).
  */
 import spa from '../../tracks/spa.json';
+import interlagos from '../../tracks/interlagos.json';
 import type { TrackDef } from '../core/types.js';
 
-const track = spa as unknown as TrackDef;
+// ?track=interlagos pra conferir uma pista específica (sessão 15) sem precisar
+// editar este arquivo toda vez — default spa, mesmo comportamento de sempre.
+const TRACKS: Record<string, unknown> = { spa, interlagos };
+const trackId = new URLSearchParams(location.search).get('track') ?? 'spa';
+const track = (TRACKS[trackId] ?? spa) as unknown as TrackDef;
 
 const canvas = document.getElementById('debug-canvas') as HTMLCanvasElement;
 const ctx = canvas.getContext('2d')!;

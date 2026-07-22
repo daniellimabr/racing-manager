@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import spaTrack from '../../tracks/spa.json';
+import interlagosTrack from '../../tracks/interlagos.json';
 import type { TrackDef, RaceState, RaceEvent, Tier, BoostId, CarSetup } from '../core/types.js';
 import {
   createRace, currentEvent, resolveCurrent, advance, revive, toRaceOutput,
@@ -26,15 +27,28 @@ import { GOLD_CRASH_PENALTY, FOLEGO_THRESHOLD_SCALE } from '../core/constants.js
 // integração mínimo pedido nesta sessão, ver Claude-Manager.md.
 import { computeRaceRewards, RARITY_LABELS, PART_SLOT_LABELS, equippedRarity, PART_SLOTS } from '../core/economy.js';
 import type { RaceRewardResult, FusionResult, PartSlot, Rarity } from '../core/economy.js';
-import { loadGame, applyRaceRewards } from '../persistence/gameSave.js';
+import { loadGame, applyRaceRewards, applyChampionshipRaceResult } from '../persistence/gameSave.js';
+import type { TeamId } from '../core/grid.js';
 
-const track = spaTrack as unknown as TrackDef;
+/**
+ * Registro de pistas disponíveis (sessão 15 — campeonato de 2 corridas,
+ * pedido do PO). `RaceScene` recebe qual pista rodar via `init({ trackId })`
+ * — sem isso, mantém `spa` como padrão (compatibilidade com quem inicia a
+ * cena direto, sem passar pelo fluxo de campeonato/Hub).
+ */
+export const TRACKS: Record<string, TrackDef> = {
+  spa: spaTrack as unknown as TrackDef,
+  interlagos: interlagosTrack as unknown as TrackDef,
+};
+export const DEFAULT_TRACK_ID = 'spa';
+
 const PANEL_Y = CANVAS_HEIGHT - PANEL_HEIGHT;
 
-function pathIndexForEvent(ev: RaceEvent): number {
-  if (ev.kind === 'pit') return track.pitPathIndex;
+/** `track` passado explicitamente (não mais um módulo-level fixo em Spa) — ver `TRACKS`/`RaceScene.track`. */
+function pathIndexForEvent(ev: RaceEvent, trackDef: TrackDef): number {
+  if (ev.kind === 'pit') return trackDef.pitPathIndex;
   if (ev.cornerId) {
-    const corner = track.corners.find((c) => c.id === ev.cornerId);
+    const corner = trackDef.corners.find((c) => c.id === ev.cornerId);
     // frenagem = ponto de entrada da curva; saída = meio caminho até o próximo
     // ponto do traçado (representa a saída/ápice) — sem isso as duas fases da
     // mesma curva caem no mesmo pathIndex e o tween entre elas não move nada
@@ -81,6 +95,12 @@ export class RaceScene extends Phaser.Scene {
   private carSetup: CarSetup = DEFAULT_CAR_SETUP;
   /** Perfil do piloto escalado pro Carro 2 (E-302/E-303, sessão 14) — `undefined` = perfil "Médio" padrão, ver core/grid.ts. */
   private teammate?: TeammateProfile;
+  /** Pista da corrida atual — vem de `init({ trackId })` (campeonato, sessão 15); `spa` por padrão. Ver `TRACKS`. */
+  private trackId: string = DEFAULT_TRACK_ID;
+  private track!: TrackDef;
+  /** true = esta corrida é uma etapa de um campeonato ativo (vem de `ChampionshipScene`) — aplica pontos de construtores no resumo. */
+  private isChampionshipRace = false;
+  private lastChampionshipPoints: Partial<Record<TeamId, number>> | null = null;
 
   private trackGraphics!: Phaser.GameObjects.Graphics;
   private startFinishLabel?: Phaser.GameObjects.Text;
@@ -203,13 +223,19 @@ export class RaceScene extends Phaser.Scene {
    * `DEFAULT_CAR_SETUP`/perfil "Médio" padrão já usados como valor inicial.
    * `teammate` (E-302/E-303, sessão 14): perfil do piloto escalado pro Carro 2.
    */
-  init(data: { carSetup?: CarSetup; teammate?: TeammateProfile } = {}): void {
+  init(data: {
+    carSetup?: CarSetup; teammate?: TeammateProfile; trackId?: string; isChampionshipRace?: boolean;
+  } = {}): void {
     if (data.carSetup) this.carSetup = data.carSetup;
     this.teammate = data.teammate;
+    this.trackId = data.trackId && TRACKS[data.trackId] ? data.trackId : DEFAULT_TRACK_ID;
+    this.isChampionshipRace = data.isChampionshipRace ?? false;
+    this.lastChampionshipPoints = null;
   }
 
   create(): void {
-    this.raceState = createRace(track, this.carSetup, { teammate: this.teammate });
+    this.track = TRACKS[this.trackId];
+    this.raceState = createRace(this.track, this.carSetup, { teammate: this.teammate });
     this.raceStartTime = Date.now();
     this.raceEnded = false;
     this.bulletTime = false;
@@ -218,7 +244,7 @@ export class RaceScene extends Phaser.Scene {
     this.visualPlayerTInitialized = false;
     this.overtakeToggleOn = false;
     this.nitroToggleOn = false;
-    trackEvent('race_start', { trackId: track.id });
+    trackEvent('race_start', { trackId: this.track.id });
 
     this.refreshFrozenGap();
     this.buildHud();
@@ -292,17 +318,17 @@ export class RaceScene extends Phaser.Scene {
     g.clear();
     g.lineStyle(6, 0x555555, 1);
     g.beginPath();
-    track.path.forEach((p, i) => {
+    this.track.path.forEach((p, i) => {
       const s = normalizedToScreen(p, TRACK_RECT);
       if (i === 0) g.moveTo(s.x, s.y);
       else g.lineTo(s.x, s.y);
     });
-    const s0 = normalizedToScreen(track.path[0], TRACK_RECT);
+    const s0 = normalizedToScreen(this.track.path[0], TRACK_RECT);
     g.lineTo(s0.x, s0.y);
     g.strokePath();
 
-    for (const corner of track.corners) {
-      const s = normalizedToScreen(track.path[corner.pathIndex], TRACK_RECT);
+    for (const corner of this.track.corners) {
+      const s = normalizedToScreen(this.track.path[corner.pathIndex], TRACK_RECT);
       g.fillStyle(0x444444, 1);
       g.fillCircle(s.x, s.y, 4);
     }
@@ -323,7 +349,7 @@ export class RaceScene extends Phaser.Scene {
     g.lineStyle(1, 0xffffff, 0.9);
     g.strokeRect(s0.x - cs, s0.y - cs, cs * 2, cs * 2);
 
-    const pit = normalizedToScreen(track.path[track.pitPathIndex], TRACK_RECT);
+    const pit = normalizedToScreen(this.track.path[this.track.pitPathIndex], TRACK_RECT);
     g.fillStyle(0x2196f3, 1);
     g.fillCircle(pit.x, pit.y, 6);
 
@@ -396,7 +422,7 @@ export class RaceScene extends Phaser.Scene {
   private advancePlayerRefT(dtMs: number): number {
     const s = this.raceState;
     const lastEvent = s.events[s.events.length - 1];
-    const curT = pathIndexToT(pathIndexForEvent(s.finished ? lastEvent : currentEvent(s)), track.path.length);
+    const curT = pathIndexToT(pathIndexForEvent(s.finished ? lastEvent : currentEvent(s), this.track), this.track.path.length);
 
     if (!this.visualPlayerTInitialized) {
       this.visualPlayerT = curT;
@@ -412,7 +438,7 @@ export class RaceScene extends Phaser.Scene {
     // Mira alguns eventos à frente, não só o próximo — ver EVENT_LOOKAHEAD_STEPS.
     const lookaheadIndex = Math.min(s.eventIndex + EVENT_LOOKAHEAD_STEPS, s.events.length - 1);
     const nextEvent = s.events[lookaheadIndex] ?? currentEvent(s);
-    const nextT = pathIndexToT(pathIndexForEvent(nextEvent), track.path.length);
+    const nextT = pathIndexToT(pathIndexForEvent(nextEvent, this.track), this.track.path.length);
     const legDist = Math.max(0, shortestDeltaT(curT, nextT));
 
     const speedTPerMs = this.bulletTime
@@ -466,7 +492,7 @@ export class RaceScene extends Phaser.Scene {
 
       entry.visualT = entry.visualT === undefined ? targetT : entry.visualT + shortestDeltaT(entry.visualT, targetT) * factor;
 
-      const point = pointAtT(track.path, entry.visualT);
+      const point = pointAtT(this.track.path, entry.visualT);
       const screen = normalizedToScreen(point, TRACK_RECT);
       entry.container.setPosition(screen.x, screen.y);
     }
@@ -684,7 +710,7 @@ export class RaceScene extends Phaser.Scene {
       this.bulletTime = false;
       this.pauseButtonContainer?.setVisible(false);
       this.toggleRowContainer?.setVisible(false);
-      trackEvent('race_abandon', { trackId: track.id, lap: this.raceState.lap });
+      trackEvent('race_abandon', { trackId: this.track.id, lap: this.raceState.lap });
       abandonRace(this.raceState);
       this.showSummary(true);
     }));
@@ -732,7 +758,7 @@ export class RaceScene extends Phaser.Scene {
     const gap = s.gapToAhead;
 
     this.hudPositionText.setText(`P${playerStanding.position}`);
-    this.hudLapValueText.setText(`${s.lap}/${track.laps}`);
+    this.hudLapValueText.setText(`${s.lap}/${this.track.laps}`);
 
     this.hudGapText.setText(formatGap(gap)).setColor(gap > 0 ? '#e74c3c' : '#2ecc71');
     if (this.hudLastGap !== null && gap !== this.hudLastGap) {
@@ -846,7 +872,7 @@ export class RaceScene extends Phaser.Scene {
     options.forEach((id, i) => {
       const rowY = 40 + i * 60;
       const btn = this.makeButton(16, rowY, CANVAS_WIDTH - 32, 40, BOOST_LABELS[id], 0xffd54f, () => {
-        trackEvent('boost_chosen', { trackId: track.id, lap: this.raceState.lap, options, chosen: id });
+        trackEvent('boost_chosen', { trackId: this.track.id, lap: this.raceState.lap, options, chosen: id });
         applyBoost(this.raceState, id);
         this.showPreChallenge(ev);
       });
@@ -1189,21 +1215,21 @@ export class RaceScene extends Phaser.Scene {
     // consultado pelo grid via `raceStandings()`).
 
     trackEvent('challenge_result', {
-      trackId: track.id, challengeId, kind: ev.kind, tier, nitroUsed, overtakeAttempt,
+      trackId: this.track.id, challengeId, kind: ev.kind, tier, nitroUsed, overtakeAttempt,
       gapBefore, gapAfter: this.raceState.gapToAhead, healthAfter: this.raceState.health,
       ...(stage1Tier ? { stage1Tier } : {}),
     });
 
     if (result.positionChanged) {
       trackEvent('overtake', {
-        trackId: track.id, lap: this.raceState.lap, direction: result.positionChanged,
+        trackId: this.track.id, lap: this.raceState.lap, direction: result.positionChanged,
         context: ev.kind === 'pit' ? 'pit' : overtakeAttempt ? 'attempt' : 'natural',
       });
     }
 
     if (!wasDnf && this.raceState.dnf) {
       trackEvent('dnf', {
-        trackId: track.id, lap: this.raceState.lap, reason: this.raceState.dnfReason, challengeId,
+        trackId: this.track.id, lap: this.raceState.lap, reason: this.raceState.dnfReason, challengeId,
         goldPenalty: this.raceState.dnfReason === 'batida forte' ? GOLD_CRASH_PENALTY : 0,
       });
     }
@@ -1266,7 +1292,7 @@ export class RaceScene extends Phaser.Scene {
     const reviveOffered = !this.raceState.usedRevive;
     if (reviveOffered) {
       const reviveBtn = this.makeButton(16, y, CANVAS_WIDTH - 32, 44, 'Voltar à corrida (revive)', 0x81c784, () => {
-        trackEvent('revive_decision', { trackId: track.id, accepted: true });
+        trackEvent('revive_decision', { trackId: this.track.id, accepted: true });
         revive(this.raceState);
         this.startEventCycle();
       });
@@ -1274,7 +1300,7 @@ export class RaceScene extends Phaser.Scene {
       y += 56;
     }
     const endBtn = this.makeButton(16, y, CANVAS_WIDTH - 32, 44, 'Encerrar corrida', 0xe57373, () => {
-      if (reviveOffered) trackEvent('revive_decision', { trackId: track.id, accepted: false });
+      if (reviveOffered) trackEvent('revive_decision', { trackId: this.track.id, accepted: false });
       this.showSummary(true);
     });
     this.panel.add(endBtn);
@@ -1304,7 +1330,7 @@ export class RaceScene extends Phaser.Scene {
       'Corrida finalizada',
       `Posição: ${output.position}/12`,
       teammateStanding ? `Carro 2 (companheiro): P${teammateStanding.position}/12` : '',
-      `Voltas completadas: ${output.lapsCompleted}/${track.laps}`,
+      `Voltas completadas: ${output.lapsCompleted}/${this.track.laps}`,
       output.dnf ? `DNF (${output.dnfReason})` : 'Chegou à bandeira quadriculada',
       output.reviveUsed ? 'Revive usado nesta corrida' : '',
       output.goldPenalty > 0 ? `Penalidade total: -${output.goldPenalty} Gold` : '',
@@ -1327,7 +1353,7 @@ export class RaceScene extends Phaser.Scene {
     if (!this.raceEnded) {
       this.raceEnded = true;
       trackEvent('race_end', {
-        trackId: track.id,
+        trackId: this.track.id,
         position: output.position,
         durationSec: Math.round((Date.now() - this.raceStartTime) / 1000),
         lapsCompleted: output.lapsCompleted,
@@ -1359,6 +1385,15 @@ export class RaceScene extends Phaser.Scene {
       this.lastEquipChanges = PART_SLOTS
         .map((slot) => ({ slot, from: equippedBefore[slot], to: equippedRarity(updatedSave.inventory, slot) }))
         .filter((c): c is { slot: PartSlot; from: Rarity; to: Rarity } => c.from !== null && c.from !== c.to && c.to !== null);
+
+      // Campeonato de construtores (sessão 15, pedido do PO): só aplica se
+      // esta corrida foi de fato lançada como etapa de um campeonato ativo
+      // (`ChampionshipScene`) — uma corrida avulsa (botão CORRER do Hub)
+      // nunca mexe no campeonato, mesmo que um esteja em andamento.
+      if (this.isChampionshipRace) {
+        const { pointsGainedThisRace } = applyChampionshipRaceResult(updatedSave, this.raceState);
+        this.lastChampionshipPoints = pointsGainedThisRace;
+      }
     }
 
     if (this.lastReward) {
@@ -1380,6 +1415,14 @@ export class RaceScene extends Phaser.Scene {
       }
     }
 
+    if (this.lastChampionshipPoints) {
+      lines.push('');
+      lines.push('— Campeonato de Construtores —');
+      const playerPts = this.lastChampionshipPoints.player ?? 0;
+      lines.push(playerPts > 0 ? `+${playerPts} pontos pra sua equipe` : 'Sem pontos nesta corrida (fora do top 10)');
+      lines.push('Etapa concluída — ver classificação completa no Campeonato');
+    }
+
     this.panel.add(this.add.text(24, 32, lines.join('\n'), { fontSize: '16px', color: '#fff', lineSpacing: 8 }));
 
     // altura ocupada pelo texto acima (aproximação por linha — fonte monoespaçada
@@ -1389,10 +1432,17 @@ export class RaceScene extends Phaser.Scene {
     this.showBackToHubButton(textBottomY + 96);
   }
 
-  /** Botão pra voltar ao Hub (E-204) depois do resumo — fecha o loop corrida→hub→corrida. */
+  /**
+   * Botão pra voltar ao Hub (E-204) depois do resumo — fecha o loop
+   * corrida→hub→corrida. Corridas de campeonato (sessão 15) voltam direto
+   * pra tela do Campeonato em vez do Hub — é lá que o jogador vê a
+   * classificação atualizada e o botão pra próxima etapa.
+   */
   private showBackToHubButton(y: number): void {
-    const btn = this.makeButton(24, y, CANVAS_WIDTH - 48, 44, 'Voltar ao Hub', 0x64b5f6, () => {
-      this.scene.start('HubScene');
+    const label = this.isChampionshipRace ? 'Ver Campeonato' : 'Voltar ao Hub';
+    const targetScene = this.isChampionshipRace ? 'ChampionshipScene' : 'HubScene';
+    const btn = this.makeButton(24, y, CANVAS_WIDTH - 48, 44, label, 0x64b5f6, () => {
+      this.scene.start(targetScene);
     });
     this.panel.add(btn);
   }
@@ -1408,7 +1458,7 @@ export class RaceScene extends Phaser.Scene {
     for (let score = 1; score <= 5; score++) {
       const x = 24 + (score - 1) * (btnW + gap);
       const btn = this.makeButton(x, y + 30, btnW, 40, String(score), 0xffd54f, () => {
-        trackEvent('feedback_score', { trackId: track.id, score });
+        trackEvent('feedback_score', { trackId: this.track.id, score });
         feedbackContainer.removeAll(true);
         feedbackContainer.add(this.add.text(24, y, 'Valeu pelo feedback!', { fontSize: '14px', color: '#81c784' }));
       });

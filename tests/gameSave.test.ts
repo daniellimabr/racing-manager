@@ -97,7 +97,7 @@ describe('gameSave (E-205)', () => {
       saveJSON('save-v1', v1Raw);
 
       const loaded = loadGame(500_000); // mesmo instante do save — sem regen no meio
-      expect(loaded.version).toBe(7);
+      expect(loaded.version).toBe(8);
       expect(loaded.gold).toBe(250);
       expect(loaded.energy).toBe(12);
       // sem escolha própria migrada (equipped ausente) → cai no mesmo fallback automático de sempre
@@ -109,7 +109,7 @@ describe('gameSave (E-205)', () => {
     it('save corrompido/desconhecido não quebra o load — reseta para um save novo', () => {
       saveJSON('save-v1', { lixo: true });
       const loaded = loadGame(0);
-      expect(loaded.version).toBe(7);
+      expect(loaded.version).toBe(8);
       expect(loaded.gold).toBe(0);
       expect(loaded.energy).toBe(ENERGY_MAX);
     });
@@ -145,7 +145,7 @@ describe('gameSave (E-205)', () => {
       };
       saveJSON('save-v1', v2Raw);
       const loaded = loadGame(0);
-      expect(loaded.version).toBe(7);
+      expect(loaded.version).toBe(8);
       expect(loaded.hasSeenTutorial).toBe(true);
     });
 
@@ -233,7 +233,7 @@ describe('gameSave (E-205)', () => {
       };
       saveJSON('save-v1', v3Raw);
       const loaded = loadGame(0);
-      expect(loaded.version).toBe(7);
+      expect(loaded.version).toBe(8);
       expect(loaded.gold).toBe(500); // progresso existente preservado
       expect(loaded.offices.motor.level).toBe(1); // escritório novo, começa do zero
     });

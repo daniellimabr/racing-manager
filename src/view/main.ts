@@ -8,6 +8,7 @@ import { SedeScene } from './SedeScene.js';
 import { PilotosScene } from './PilotosScene.js';
 import { MarketingScene } from './MarketingScene.js';
 import { LojaScene } from './LojaScene.js';
+import { ChampionshipScene } from './ChampionshipScene.js';
 import { CANVAS_WIDTH, CANVAS_HEIGHT } from './viewConstants.js';
 import { initPostHogFromEnv, track } from '../telemetry/analytics.js';
 
@@ -47,5 +48,10 @@ new Phaser.Game({
   // livery, acessível via botão "MARKETING" no Hub.
   // LojaScene (E-305, sessão 14): baús comprados com Aura, acessível via
   // botão "LOJA" no Hub.
-  scene: [HubScene, RaceScene, OficinaScene, TutorialScene, SedeScene, PilotosScene, MarketingScene, LojaScene],
+  // ChampionshipScene (sessão 15): campeonato de construtores de 2 corridas
+  // (Spa → Interlagos), acessível via botão "CAMPEONATO" no Hub.
+  scene: [
+    HubScene, RaceScene, OficinaScene, TutorialScene, SedeScene, PilotosScene, MarketingScene, LojaScene,
+    ChampionshipScene,
+  ],
 });

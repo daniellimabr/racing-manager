@@ -17,6 +17,9 @@ import {
 import { findPilot } from '../core/pilots.js';
 import { findSponsor, totalSponsorGoldBonusPct, LIVERY_SPONSOR_SLOTS } from '../core/sponsors.js';
 import { CHESTS, openChest, type ChestTier } from '../core/chests.js';
+import { createChampionship, applyRaceResultToChampionship, type ChampionshipState } from '../core/championship.js';
+import type { RaceState } from '../core/types.js';
+import type { TeamId } from '../core/grid.js';
 
 const SAVE_KEY = 'save-v1';
 
@@ -53,13 +56,20 @@ const SAVE_KEY = 'save-v1';
  * migrados começam com 0 Aura — não tem como reconstruir pódios já corridos
  * antes desta feature existir, mesmo raciocínio de "começa do zero" do v4/v6.
  *
+ * v8 (sessão 15, campeonato de 2 corridas — pedido direto do PO):
+ * `championship` passou a existir (`ChampionshipState | null`, `core/
+ * championship.ts`). `null` = nenhum campeonato em andamento (mostra o botão
+ * "Iniciar Campeonato" no Hub); saves migrados começam em `null` — não tem
+ * como reconstruir um campeonato que nunca existiu, mesmo raciocínio de
+ * "começa do zero" do v4/v6/v7.
+ *
  * Ver `migrateSave` para como saves antigos são tratados sem perder progresso
  * nem mudar de comportamento.
  */
-const CURRENT_VERSION = 7;
+const CURRENT_VERSION = 8;
 
 export interface GameSave {
-  version: 7;
+  version: 8;
   gold: number;
   energy: number;
   energyLastUpdateMs: number;
@@ -80,6 +90,8 @@ export interface GameSave {
   hiredSponsorIds: string[];
   /** Moeda premium (CLAUDE.md §6.2) — ganha só de pódio de corrida nesta sessão (`auraForPosition`), gasta em `buyChest`. */
   aura: number;
+  /** Campeonato de construtores em andamento (2 corridas — Spa → Interlagos), ou `null` se nenhum foi iniciado ainda. */
+  championship: ChampionshipState | null;
 }
 
 /**
@@ -108,6 +120,7 @@ function defaultSave(nowMs: number): GameSave {
     reputacao: 0,
     hiredSponsorIds: [],
     aura: 0,
+    championship: null,
   };
 }
 
@@ -129,10 +142,11 @@ function migrateSave(raw: unknown, nowMs: number): GameSave {
     version?: unknown; gold?: unknown; energy?: unknown; energyLastUpdateMs?: unknown; hasSeenTutorial?: unknown;
     offices?: unknown; pilotRoster?: unknown; activePilotId?: unknown;
     marketingOffice?: unknown; reputacao?: unknown; hiredSponsorIds?: unknown; aura?: unknown;
+    championship?: unknown;
     inventory?: { counts?: PartInventory['counts']; equipped?: Partial<Record<PartSlot, Rarity | null>> };
   };
   const knownVersion = r.version === 1 || r.version === 2 || r.version === 3 || r.version === 4
-    || r.version === 5 || r.version === 6 || r.version === CURRENT_VERSION;
+    || r.version === 5 || r.version === 6 || r.version === 7 || r.version === CURRENT_VERSION;
   if (!knownVersion || !r.inventory?.counts) return defaultSave(nowMs);
 
   const equipped = { ...(r.inventory.equipped ?? {}) } as Record<PartSlot, Rarity | null>;
@@ -157,6 +171,10 @@ function migrateSave(raw: unknown, nowMs: number): GameSave {
   const hiredSponsorIds = Array.isArray(r.hiredSponsorIds) ? (r.hiredSponsorIds as string[]) : [];
   // saves v1-v6 (sem Aura) começam com 0 — mesmo raciocínio do v4/v6.
   const aura = typeof r.aura === 'number' ? r.aura : 0;
+  // saves v1-v7 (sem campeonato) começam sem nenhum em andamento — mesmo
+  // raciocínio do v4/v6/v7 (não tem histórico de campeonato pra reconstruir).
+  const championship = (r.championship && typeof r.championship === 'object')
+    ? (r.championship as ChampionshipState) : null;
   return {
     version: CURRENT_VERSION,
     gold: typeof r.gold === 'number' ? r.gold : 0,
@@ -171,6 +189,7 @@ function migrateSave(raw: unknown, nowMs: number): GameSave {
     reputacao,
     hiredSponsorIds,
     aura,
+    championship,
   };
 }
 
@@ -201,6 +220,39 @@ export function spendEnergyForRace(save: GameSave, cost: number): GameSave {
   const updated: GameSave = { ...save, energy: Math.max(0, save.energy - cost) };
   saveGame(updated);
   return updated;
+}
+
+/**
+ * Inicia um campeonato novo (sessão 15, pedido do PO). `null` = nenhum
+ * campeonato em andamento antes; sobrescreve sem perguntar se já havia um —
+ * a UI (`ChampionshipScene`) só oferece este botão quando não há nenhum em
+ * andamento, então chegar aqui com um campeonato já ativo não deveria
+ * acontecer no fluxo normal.
+ */
+export function startChampionship(save: GameSave): GameSave {
+  const updated: GameSave = { ...save, championship: createChampionship() };
+  saveGame(updated);
+  return updated;
+}
+
+export interface ChampionshipRaceApplyResult {
+  save: GameSave;
+  pointsGainedThisRace: Partial<Record<TeamId, number>>;
+}
+
+/**
+ * Aplica o resultado de uma corrida (já finalizada ou DNF) ao campeonato em
+ * andamento — soma pontos de construtores e avança pra próxima corrida do
+ * calendário (`core/championship.ts`). Não faz nada (`pointsGainedThisRace`
+ * vazio) se não houver campeonato ativo — chamador (`RaceScene.showSummary`)
+ * já checa isso antes, mas defensivo aqui também.
+ */
+export function applyChampionshipRaceResult(save: GameSave, raceState: RaceState): ChampionshipRaceApplyResult {
+  if (!save.championship) return { save, pointsGainedThisRace: {} };
+  const { state, pointsGainedThisRace } = applyRaceResultToChampionship(save.championship, raceState);
+  const updated: GameSave = { ...save, championship: state };
+  saveGame(updated);
+  return { save: updated, pointsGainedThisRace };
 }
 
 export interface ApplyRewardsResult {

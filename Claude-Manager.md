@@ -2,7 +2,8 @@
 
 > Documento vivo mantido pelo agente TechLead-Manager (ver protocolo em Claude-Tech.md, seção 1.1).
 > Anexar junto com CLAUDE.md e Claude-Tech.md em conversas sobre a trilha Manager.
-> Última atualização: 2026-07-22 (pedido pontual feito dentro de uma rodada da trilha Racing, cross-referenciado aqui: botão "Coletar tudo" na Sede — coleta a produção pendente dos 7 escritórios numa tacada só, em vez de 1 por 1. `collectAllOfficeParts()` novo em `gameSave.ts`. Ver seção 2.12.)
+> Última atualização: 2026-07-22 (trabalho feito dentro da sessão 16 da trilha Racing, cross-referenciado aqui: `GameSave` v8 — novo campo `championship: ChampionshipState | null`, suportando o campeonato de construtores de 2 corridas (Spa→Interlagos) que a trilha Racing implementou nesta rodada. Duas funções novas em `gameSave.ts`: `startChampionship()` (cria e persiste um `ChampionshipState` zerado) e `applyChampionshipRaceResult()` (aplica o resultado de uma corrida — Gold/peças continuam passando por `applyRaceRewards()` como sempre, isso é só a camada de pontos de construtores por cima). Migração v7→v8 segue o padrão já estabelecido: campo ausente em saves antigos vira `null`. Ver seção 2.13 pro detalhe técnico completo; a lógica de pontuação/calendário em si (`core/championship.ts`, `ChampionshipScene`) é dona da trilha Racing — ver Claude-Racing.md §2.36.)
+> Última atualização anterior: 2026-07-22 (pedido pontual feito dentro de uma rodada da trilha Racing, cross-referenciado aqui: botão "Coletar tudo" na Sede — coleta a produção pendente dos 7 escritórios numa tacada só, em vez de 1 por 1. `collectAllOfficeParts()` novo em `gameSave.ts`. Ver seção 2.12.)
 >
 > Última atualização anterior: 2026-07-21 (sessão 5 — 3 épicos entregues numa rodada grande autorizada pelo PO sem interrupção: **Pilotos + Carro 2 pontuando (E-302/E-303)** — roster fixo de 4 pilotos contratáveis, Carro 2 (companheiro de IA) finalmente configurável em vez do perfil "Médio" fixo, `GameSave` v5; **patrocinadores da livery + escritório de marketing** — pendência antiga (seção 5, item 6, registrada desde a sessão 4) finalmente destravada, 8 patrocinadores pra 6 posições, custo em Reputação produzida pelo escritório de marketing, `GameSave` v6; **Loja/baús + Aura (E-305)** — 4 tiers de baú, moeda premium Aura ganha só de pódio (IAP real continua fora de escopo), `GameSave` v7. 169/169 testes, tsc limpo, build ok, smoke test manual (Playwright) das 3 telas novas sem erro de console. Ver seção 2.11 pro detalhe técnico completo.)
 >
@@ -31,6 +32,7 @@
 | Patrocinadores da livery + escritório de marketing | ✅ Feito (sessão 5, 2026-07-21) | Pendência da seção 5 item 6 (desde a sessão 4) — 8 patrocinadores/6 posições, custo em Reputação. `GameSave` v6 — ver seção 2.11 |
 | E-305 Loja/baús + Aura | ✅ Feito (sessão 5, 2026-07-21) | 4 tiers de baú, Aura só de pódio (IAP real fora de escopo). `GameSave` v7 — ver seção 2.11 |
 | Sede — botão "Coletar tudo" | ✅ Feito (2026-07-22) | `collectAllOfficeParts()`, coleta os 7 escritórios de uma vez — ver seção 2.12 |
+| `GameSave` v8 — campo `championship` | ✅ Feito (sessão 16, 2026-07-22) | `startChampionship()`/`applyChampionshipRaceResult()`; lógica dona da trilha Racing (Claude-Racing.md §2.36) — ver seção 2.13 |
 
 **Como rodar:** `npm install && npm test && npm run economy && npm run dev` (Hub é a tela inicial; botão OFICINA leva à nova tela de equipar; `npm run bots` continua sendo o harness da trilha Racing, não tocado aqui).
 
@@ -218,6 +220,17 @@ PO confirmou 3 itens de calibração/UX pendentes (registrados em `Claude-Racing
 Pedido direto do PO: coletar a produção pendente dos 7 escritórios um por um (botão "Coletar" de cada linha) era repetitivo. Adicionado `collectAllOfficeParts(save)` em `persistence/gameSave.ts` — mesmo espírito de `collectOfficeParts(save, slot)` (já existente), só que passa pelos 7 slots numa volta só, acumulando as peças coletadas de todos antes de rodar `fuseAll()` e salvar 1x só no final (em vez de 7 leituras/escritas separadas). `SedeScene` ganhou um botão "Coletar tudo (N peças prontas)" logo acima da lista de escritórios (`FIRST_ROW_Y` 96→132 pra abrir espaço) — mostra a contagem total pendente em todos os escritórios juntos, some (fica desabilitado, "nada pronto ainda") quando não há nada, e atualiza junto com qualquer coleta individual também (`refreshCollectAllButton()` chamado nos 2 caminhos).
 
 **Verificação:** `npm run build` limpo, smoke test Playwright — forçou produção pendente em todos os 7 escritórios (via localStorage direto, mesmo formato de `loadGame()`), clicou "Coletar tudo", confirmou as peças caindo no inventário dos 7 slots numa tacada só e o botão voltando a "nada pronto ainda" depois. Sem teste automatizado dedicado (`gameSave.test.ts`) ainda — a função é pequena e seguiu o padrão exato de uma função já testada (`collectOfficeParts`); considerar adicionar um teste determinístico se `collectAllOfficeParts` ganhar lógica própria no futuro.
+
+### 2.13 `GameSave` v8 — campo `championship` (sessão 16, trabalho feito dentro de uma rodada da trilha Racing, cross-referenciado aqui — ver Claude-Racing.md §2.36 pra lógica de calendário/pontuação)
+
+A trilha Racing implementou o campeonato de construtores de 2 corridas (Spa→Interlagos) — a lógica de calendário, pontuação e agregação por `teamId` (`core/championship.ts`, `ChampionshipState`) é dona da trilha Racing e está documentada lá. Aqui só o lado de persistência, que segue o padrão exato já estabelecido nas 7 migrações anteriores:
+
+- `CURRENT_VERSION` 7→8, novo campo `championship: ChampionshipState | null` em `GameSave` (`null` = campeonato nunca iniciado, igual ao padrão de outros campos opcionais como `activePilotId`). `defaultSave()` retorna `championship: null`; `migrateSave()` trata saves v1-v7 (campo ausente) da mesma forma — vira `null`, sem quebrar saves existentes.
+- Duas funções novas em `gameSave.ts`, espelhando o padrão de `spendEnergyForRace`/`applyRaceRewards` (mutação imutável + `saveGame()` embutido, devolve o `GameSave` atualizado):
+  - `startChampionship(save)`: cria um `ChampionshipState` novo (via `createChampionship()`, dono da trilha Racing) e persiste.
+  - `applyChampionshipRaceResult(save, raceState)`: aplica o resultado de UMA corrida ao campeonato em andamento (no-op se `save.championship` for `null`) e persiste; devolve também `pointsGainedThisRace` pra `RaceScene` mostrar "+N pontos" na tela de resumo sem precisar reconsultar o save. **Não mexe em Gold/peças/Aura** — isso continua sendo `applyRaceRewards()`, chamado separadamente; a camada de campeonato é aditiva por cima do fluxo de recompensa já existente, não substitui nada.
+
+**Verificação:** `tests/gameSave.test.ts` atualizado (4 asserções de `version` 7→8); sem teste de persistência dedicado pro campo `championship` em si além disso — a cobertura de comportamento (calendário avança, pontos somam certo, standings ordenam) já está em `tests/championship.test.ts` (dono da trilha Racing), que testa `core/championship.ts` diretamente sem depender do `localStorage`.
 
 ## 3. Questões em aberto — perguntas específicas pro PO
 
