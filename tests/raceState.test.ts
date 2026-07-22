@@ -3,6 +3,7 @@ import { createRace, currentEvent, resolveCurrent, advance, revive, tryUseNitro,
 import {
   REPAIR_BOOST_AMOUNT, DAMAGE, GAIN, GOLD_CRASH_PENALTY, PLAYER_GRID_PACE_SCALE,
   MISS_INSTANT_DNF_CHANCE_MIN, MISS_INSTANT_DNF_CHANCE_MAX, NOMINAL_LAP_SECONDS,
+  RASANTE_BOOST_SCALE,
 } from '../src/core/constants.js';
 import type { TrackDef, CarSetup, RaceState } from '../src/core/types.js';
 
@@ -317,6 +318,34 @@ describe('boosts (sessão 5)', () => {
     applyBoost(s, 'recuperacao_erro');
     const r = resolveCurrent(s, 'purple', { nitroUsed: false });
     expect(r.gainSeconds).toBeCloseTo(0.30, 5);
+  });
+});
+
+describe('boosts rasante e fôlego de ultrapassagem (sessão 13)', () => {
+  it('rasante reforça +25% o ganho da própria saída em que foi escolhido, e é consumido na hora', () => {
+    const s = createRace(track, setup); // currentEvent já é a largada (saída)
+    applyBoost(s, 'rasante');
+    expect(s.pendingBoost).toBe('rasante');
+    const r = resolveCurrent(s, 'purple', { nitroUsed: false });
+    // saída aplica metade + rasante reforça 25%: 0.30 * 1.25 * 0.5
+    expect(r.gainSeconds).toBeCloseTo(GAIN.purple * RASANTE_BOOST_SCALE * 0.5, 5);
+    expect(s.pendingBoost).toBeNull(); // consumido, não fica pendente pra próxima frenagem
+  });
+
+  it('rasante não piora um resultado ruim (só reforça ganho positivo)', () => {
+    const s = createRace(track, setup);
+    applyBoost(s, 'rasante');
+    const r = resolveCurrent(s, 'miss', { nitroUsed: false });
+    expect(r.gainSeconds).toBeCloseTo(GAIN.miss * 0.5, 5); // sem multiplicador nenhum
+  });
+
+  it('rasante não tem efeito se a saída em que foi escolhido já passou (não é mais pendingBoost)', () => {
+    const s = createRace(track, setup);
+    applyBoost(s, 'rasante');
+    resolveCurrent(s, 'purple', { nitroUsed: false }); // consome o rasante aqui
+    advance(s);
+    const r2 = resolveCurrent(s, 'purple', { nitroUsed: false }); // frenagem seguinte, sem boost pendente
+    expect(r2.gainSeconds).toBeCloseTo(GAIN.purple, 5); // sem reforço, sem meio-ganho (não é saída)
   });
 });
 

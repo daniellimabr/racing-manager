@@ -90,4 +90,10 @@ describe('canAttemptOvertake', () => {
     expect(canAttemptOvertake(1.0)).toBe(false);
     expect(canAttemptOvertake(1.5)).toBe(false);
   });
+
+  it('boost "fôlego de ultrapassagem" (thresholdScale) alarga o limiar (sessão 13)', () => {
+    expect(canAttemptOvertake(1.2)).toBe(false); // acima do limiar normal (1.0s)
+    expect(canAttemptOvertake(1.2, 1.5)).toBe(true); // dentro do limiar alargado (1.5s)
+    expect(canAttemptOvertake(1.6, 1.5)).toBe(false); // ainda acima mesmo alargado
+  });
 });

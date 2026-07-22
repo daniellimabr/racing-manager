@@ -78,8 +78,13 @@ export function computeScale(opts: ScaleOptions): number {
   return Math.min(scale, MAX_SCALE);
 }
 
-export function canAttemptOvertake(gap: number): boolean {
-  return Math.abs(gap) < OVERTAKE_GAP_THRESHOLD;
+/**
+ * `thresholdScale` (default 1, sem efeito): boost "fôlego de ultrapassagem"
+ * (sessão 13) passa um valor > 1 pra alargar temporariamente o gap máximo em
+ * que dá pra tentar ultrapassar — ver FOLEGO_THRESHOLD_SCALE.
+ */
+export function canAttemptOvertake(gap: number, thresholdScale = 1): boolean {
+  return Math.abs(gap) < OVERTAKE_GAP_THRESHOLD * thresholdScale;
 }
 
 /** Sorteia um tier dado uma distribuição de probabilidades (usado por IAs e bots). */

@@ -19,7 +19,7 @@ import {
 } from './viewConstants.js';
 import { track as trackEvent } from '../telemetry/analytics.js';
 import { juice } from './juice.js';
-import { GOLD_CRASH_PENALTY } from '../core/constants.js';
+import { GOLD_CRASH_PENALTY, FOLEGO_THRESHOLD_SCALE } from '../core/constants.js';
 // E-202/E-203 (Manager, M2): recompensas pós-corrida (Gold + peças) — ponto de
 // integração mínimo pedido nesta sessão, ver Claude-Manager.md.
 import { computeRaceRewards, RARITY_LABELS, PART_SLOT_LABELS, equippedRarity, PART_SLOTS } from '../core/economy.js';
@@ -497,7 +497,10 @@ export class RaceScene extends Phaser.Scene {
   private showBoostChoice(ev: RaceEvent): void {
     this.clearPanel();
     this.panel.add(this.add.text(16, 12, 'Boost da volta — escolha 1:', { fontSize: '14px', color: '#fff' }));
-    const allBoosts: BoostId[] = ['pneu', 'freio', 'janela', 'reparo_rapido', 'nitro_extra', 'recuperacao_erro'];
+    const allBoosts: BoostId[] = [
+      'pneu', 'freio', 'janela', 'reparo_rapido', 'nitro_extra', 'recuperacao_erro',
+      'rasante', 'folego_ultrapassagem',
+    ];
     const options: BoostId[] = allBoosts.sort(() => Math.random() - 0.5).slice(0, 3);
     options.forEach((id, i) => {
       const rowY = 40 + i * 60;
@@ -544,7 +547,12 @@ export class RaceScene extends Phaser.Scene {
     // confirmar que o jogador não é o líder antes de oferecer ultrapassagem
     // (bug antigo, corrigido estruturalmente aqui, não só por um guard pontual
     // como na sessão 7).
-    const canOvertake = !isSaida && !isPit && this.raceState.position > 1 && canAttemptOvertake(this.raceState.gapToAhead);
+    // Boost "fôlego de ultrapassagem" (sessão 13): alarga o gap máximo em que
+    // dá pra tentar, enquanto pendente (limpo pelo core na próxima frenagem/pit
+    // resolvida, mesmo padrão dos outros boosts "aguarda a próxima").
+    const overtakeThresholdScale = this.raceState.pendingBoost === 'folego_ultrapassagem' ? FOLEGO_THRESHOLD_SCALE : 1;
+    const canOvertake = !isSaida && !isPit && this.raceState.position > 1
+      && canAttemptOvertake(this.raceState.gapToAhead, overtakeThresholdScale);
     const hasNitro = this.raceState.nitro > 0;
 
     if (!canOvertake && !hasNitro) {

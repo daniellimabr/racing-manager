@@ -4,7 +4,9 @@ export type Tier = 'purple' | 'green' | 'amber' | 'red' | 'miss';
 
 export type EventKind = 'saida' | 'frenagem' | 'pit';
 
-export type BoostId = 'pneu' | 'freio' | 'janela' | 'reparo_rapido' | 'nitro_extra' | 'recuperacao_erro';
+export type BoostId =
+  | 'pneu' | 'freio' | 'janela' | 'reparo_rapido' | 'nitro_extra' | 'recuperacao_erro'
+  | 'rasante' | 'folego_ultrapassagem';
 
 export interface CornerDef {
   id: string;

@@ -149,6 +149,28 @@ export const ERROR_RECOVERY_RELIEF = 0.5;
 export const NITRO_GOOD_BONUS = 1.10; // +10% em ganhos positivos
 export const NITRO_BAD_RELIEF = 0.6; // penalidade cai para 60% do valor original
 
+/**
+ * Boost "rasante" (slipstream, CLAUDE.md §6.1 — sessão 13, últimos 2 dos 8
+ * conceitos implementados). Diferente dos outros boosts (que esperam até a
+ * próxima frenagem/pit pra agir): rasante é sobre pegar o rastro de ar na
+ * reta, então se aplica na PRÓPRIA saída em que foi escolhido (a única saída
+ * elegível a oferecer boost), não numa saída futura — tentar adiar pra "a
+ * próxima saída de verdade" esbarraria na lógica existente de limpar
+ * `pendingBoost` em qualquer evento não-saída pelo meio (a frenagem entre a
+ * saída atual e a próxima apagaria o boost antes de ele valer). Só reforça
+ * ganho positivo (não piora um resultado ruim), mesmo espírito do nitro.
+ */
+export const RASANTE_BOOST_SCALE = 1.25; // +25% no ganho da saída em que foi escolhido, se o resultado já for positivo
+
+/**
+ * Boost "fôlego de ultrapassagem" (CLAUDE.md §6.1 — sessão 13). Alarga
+ * temporariamente o gap máximo em que dá pra tentar ultrapassar
+ * (`OVERTAKE_GAP_THRESHOLD`) na próxima frenagem/pit — mesmo padrão dos
+ * outros boosts "aguarda a próxima frenagem/pit" (freio/janela/reparo_rapido/
+ * recuperacao_erro/pneu).
+ */
+export const FOLEGO_THRESHOLD_SCALE = 1.5; // limiar de 1,0s vira 1,5s enquanto pendente
+
 export const OVERTAKE_GAP_THRESHOLD = 1.0; // segundos — só pode tentar ultrapassar abaixo disso
 export const PIT_SCALE = 1.3; // equipe de pit stop alarga a zona
 export const PNEU_BOOST_SCALE = 1.2;

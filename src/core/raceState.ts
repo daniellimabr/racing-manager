@@ -9,7 +9,7 @@ import {
   GAIN, DAMAGE, NITRO_GOOD_BONUS, NITRO_BAD_RELIEF,
   REPAIR_BOOST_AMOUNT, ERROR_RECOVERY_RELIEF, PLAYER_GRID_PACE_SCALE,
   MISS_INSTANT_DNF_CHANCE_MIN, MISS_INSTANT_DNF_CHANCE_MAX, GOLD_CRASH_PENALTY,
-  NOMINAL_LAP_SECONDS,
+  NOMINAL_LAP_SECONDS, RASANTE_BOOST_SCALE,
 } from './constants.js';
 
 /**
@@ -144,6 +144,15 @@ export function resolveCurrent(state: RaceState, tier: Tier, opts: ResolveOption
   let gain = GAIN[tier];
   if (opts.nitroUsed) gain = gain >= 0 ? gain * NITRO_GOOD_BONUS : gain * NITRO_BAD_RELIEF;
   if (!isSaida && gain < 0 && state.pendingBoost === 'recuperacao_erro') gain *= ERROR_RECOVERY_RELIEF;
+  // Boost "rasante" (slipstream) — só se aplica na PRÓPRIA saída em que foi
+  // escolhido (a única saída elegível a oferecer boost), não numa saída
+  // futura — ver comentário completo em RASANTE_BOOST_SCALE (constants.ts).
+  // Consumido na hora (diferente dos outros boosts, que ficam pendentes até
+  // a próxima frenagem/pit e são limpos lá).
+  if (isSaida && gain >= 0 && state.pendingBoost === 'rasante') {
+    gain *= RASANTE_BOOST_SCALE;
+    state.pendingBoost = null;
+  }
   if (isSaida) gain *= 0.5;
 
   state.raceProgress += gain;

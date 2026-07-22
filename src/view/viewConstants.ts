@@ -95,6 +95,8 @@ export const BOOST_LABELS: Record<BoostId, string> = {
   reparo_rapido: 'Reparo rápido',
   nitro_extra: 'Nitro extra',
   recuperacao_erro: 'Recuperação de erro',
+  rasante: 'Rasante',
+  folego_ultrapassagem: 'Fôlego de ultrapassagem',
 };
 
 /** Feedback de playtest do PO: os nomes dos boosts não deixavam claro o efeito (Claude-Racing.md §2.21). */
@@ -105,6 +107,8 @@ export const BOOST_DESCRIPTIONS: Record<BoostId, string> = {
   reparo_rapido: 'Recupera saúde na próxima frenagem/pit resolvida',
   nitro_extra: '+1 carga de nitro, concedida na hora',
   recuperacao_erro: 'Reduz a perda de tempo do seu próximo erro (vermelho/miss)',
+  rasante: 'Pega o rastro nesta saída: +25% no ganho, se já for positivo',
+  folego_ultrapassagem: 'Facilita tentar ultrapassagem na próxima frenagem/pit (gap máximo maior)',
 };
 
 /** Boost "janela ampliada": fator de aumento no tempo disponível do próximo desafio de frenagem/pit. */
