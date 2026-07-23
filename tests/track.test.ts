@@ -23,11 +23,19 @@ describe('buildEventSequence', () => {
     expect(pits[0].lap).toBe(4);
   });
 
-  it('oferece boost 1x por volta (largada + fim de cada volta, exceto a última)', () => {
+  it('oferece boost 1x por volta (largada + saída da 1ª curva de cada volta seguinte, depois da linha)', () => {
     const events = buildEventSequence(spa);
     const boostable = events.filter(e => e.boostEligible);
-    // largada (volta 1) + fim das voltas 1..7 (a volta 8 não libera boost pois a corrida acaba)
-    expect(boostable.length).toBe(spa.laps); // 1 (largada) + 7 (fins de volta)
+    // largada (volta 1) + saída da curva 1 das voltas 2..8 (depois de já ter cruzado a linha)
+    expect(boostable.length).toBe(spa.laps); // 1 (largada) + 7 (início das voltas seguintes)
+    expect(boostable[0].kind).toBe('saida');
+    expect(boostable[0].cornerName).toBe('Largada');
+    for (const ev of boostable.slice(1)) {
+      // precisa ser 'saida' (não 'frenagem') — boost "rasante" só funciona se
+      // aplicado na própria saída em que foi escolhido, ver comentário em track.ts
+      expect(ev.kind).toBe('saida');
+      expect(ev.cornerId).toBe('c0');
+    }
   });
 
   it('mantém a ordem frenagem -> saída para cada curva', () => {

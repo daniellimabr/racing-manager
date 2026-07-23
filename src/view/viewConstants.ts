@@ -91,9 +91,20 @@ export const LARGADA_FALL_RATE = 0.065; // unidades/ms caindo quando solta
  */
 export const LARGADA_ZONE_SCALE = 0.7;
 /**
- * Pausa de ritmo (não mais duração de tween — ver nota da sessão 15 abaixo)
- * entre resolver um evento e mostrar a decisão do próximo, dando tempo de ler
- * o resultado antes da próxima tela aparecer (T-104: 0,8–1,2s por trecho).
+ * Duração (ms) da "viagem" animada entre o evento que acabou de ser resolvido
+ * e o próximo — volta a ser literalmente uma duração de tween na sessão 19
+ * (era só uma pausa de ritmo entre a sessão 15 e a 19, ver nota logo abaixo):
+ * bug reportado pelo PO ("carros se lançam muito rapidamente para a próxima
+ * curva após a aceleração, sem animação até o bullet time da curva seguinte")
+ * — o modelo de crawl contínuo (`advancePlayerRefT`) só sabia perseguir o
+ * evento ATUAL; quando esse alvo mudava de repente pra um evento bem mais à
+ * frente (post-`advance()`), o ícone teleportava pra lá no mesmo frame em vez
+ * de percorrer a distância. `RaceScene.traveling` agora interpola
+ * explicitamente `travelFromT -> próximo evento` ao longo desta mesma duração
+ * — reaproveita o orçamento de tempo que já existia (não muda o ritmo total
+ * da corrida), só passa a de fato mover o ícone durante esse tempo. O bullet
+ * time do próximo desafio (`startTimingChallenge`) só liga depois que essa
+ * viagem termina (T-104: 0,8–1,2s por trecho).
  */
 export const TWEEN_DURATION_MS = 1000;
 

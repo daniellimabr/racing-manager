@@ -154,6 +154,28 @@ export class RaceScene extends Phaser.Scene {
   private visualPlayerTInitialized = false;
 
   /**
+   * Fase de "viagem" (sessão 19, bug reportado pelo PO: "os carros se lançam
+   * muito rapidamente para a próxima curva após a aceleração — sem animação
+   * até o bullet time do desafio da curva seguinte"). Causa raiz: fora desta
+   * fase, `advancePlayerRefT` só sabe "aproximar-se" do evento ATUAL sendo
+   * desafiado (via `curT`); quando `advance()` troca esse alvo pra um evento
+   * bem mais à frente (ex.: fim de uma reta inteira, depois de resolver uma
+   * saída), o cálculo de progresso (sempre >= 0 em relação ao NOVO `curT`)
+   * zerava, e o ícone reaparecia direto na nova posição no mesmo frame — um
+   * teleporte, não uma animação. `traveling` interpola explicitamente de
+   * `travelFromT` até o próximo evento ao longo de `TWEEN_DURATION_MS` (o
+   * mesmo orçamento de tempo que já existia como pausa "morta" antes desta
+   * correção — não muda o ritmo total da corrida, só passa a de fato mover o
+   * ícone durante esse tempo). `startEventCycle()` do próximo evento (e,
+   * portanto, o bullet time do desafio dele) só roda quando essa viagem
+   * termina — ver `update()`/`advanceAndAnimate()`.
+   */
+  private traveling = false;
+  private travelFromT = 0;
+  private travelDeltaT = 0;
+  private travelStartTime = 0;
+
+  /**
    * Snapshot do `gapToLeader` do jogador usado pra posicionar os OUTROS 11
    * carros (deslocamento relativo, ver `tickVisualPositions`). Bug real
    * reportado pelo PO na sessão 15 ("os carros dão um pequeno passo atrás
@@ -336,6 +358,14 @@ export class RaceScene extends Phaser.Scene {
     // próximo evento e os carros derivavam pela pista antes do jogador
     // sequer ver o desafio de largada (bug reportado pelo PO — Claude-Racing.md).
     this.tickVisualPositions(this.raceStarted ? dt : 0);
+
+    // Fim da fase de "viagem" (ver comentário de `traveling`): só inicia o
+    // ciclo do próximo evento (boost/desafio, incluindo o bullet time dele)
+    // depois que a interpolação até lá de fato terminou — nunca antes.
+    if (this.traveling && this.time.now - this.travelStartTime >= TWEEN_DURATION_MS) {
+      this.traveling = false;
+      this.startEventCycle();
+    }
   }
 
   // ---------- desenho estático ----------
@@ -485,6 +515,15 @@ export class RaceScene extends Phaser.Scene {
    * para o próximo evento não precisa de nenhum reset explícito.
    */
   private advancePlayerRefT(dtMs: number): number {
+    // Fase de viagem ativa (ver comentário de `traveling`): a posição é pura
+    // interpolação no tempo, não a lógica de "perseguir o evento atual" —
+    // essa lógica só reassume depois que `update()` encerra a viagem.
+    if (this.traveling) {
+      const progress = Math.min(1, (this.time.now - this.travelStartTime) / TWEEN_DURATION_MS);
+      this.visualPlayerT = this.travelFromT + this.travelDeltaT * progress;
+      return this.visualPlayerT;
+    }
+
     const s = this.raceState;
     const lastEvent = s.events[s.events.length - 1];
     const curT = pathIndexToT(pathIndexForEvent(s.finished ? lastEvent : currentEvent(s), this.track), this.track.path.length);
@@ -805,6 +844,7 @@ export class RaceScene extends Phaser.Scene {
     this.challengeStartTime += pausedDuration;
     this.largadaGoAt += pausedDuration;
     this.largadaLightsDoneAt += pausedDuration;
+    this.travelStartTime += pausedDuration;
 
     this.time.paused = false;
     this.pauseOverlay?.destroy();
@@ -1343,18 +1383,31 @@ export class RaceScene extends Phaser.Scene {
   }
 
   private advanceAndAnimate(): void {
+    const fromT = this.visualPlayerT;
     // `advance()` agora também avança o grid internamente (sessão 11, ver
     // Claude-Racing.md §3/§6 item 5) — não precisa mais de um `advanceGrid`
-    // separado aqui em lockstep. O deslocamento visual dos ícones em direção
-    // ao novo evento é contínuo (`tickVisualPositions`, chamado todo frame em
-    // `update()`) — não precisa mais disparar aqui; este delay é só um
-    // respiro de ritmo antes de mostrar a próxima decisão.
+    // separado aqui em lockstep.
     advance(this.raceState);
     // Sincroniza o snapshot de gap dos outros carros com a MESMA transição
     // (curT/refT também mudam agora) — ver comentário de `frozenPlayerGapToLeader`.
     this.refreshFrozenGap();
     this.updateHud();
-    this.time.delayedCall(TWEEN_DURATION_MS, () => this.startEventCycle());
+
+    // Inicia a fase de "viagem" (ver comentário de `traveling`): interpola de
+    // onde o ícone estava até a posição do NOVO evento atual, ao longo de
+    // `TWEEN_DURATION_MS` — substitui o antigo `delayedCall` que só esperava
+    // parado (deixando `tickVisualPositions` "teleportar" o ícone pro novo
+    // alvo no 1º frame seguinte, bug reportado pelo PO).
+    const s = this.raceState;
+    const lastEvent = s.events[s.events.length - 1];
+    const toT = pathIndexToT(
+      pathIndexForEvent(s.finished ? lastEvent : currentEvent(s), this.track),
+      this.track.path.length
+    );
+    this.travelFromT = fromT;
+    this.travelDeltaT = shortestDeltaT(fromT, toT);
+    this.travelStartTime = this.time.now;
+    this.traveling = true;
   }
 
   // ---------- DNF / resumo ----------
