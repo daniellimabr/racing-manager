@@ -18,7 +18,7 @@ import {
   LARGADA_PREP_MS, LARGADA_LIGHT_INTERVAL_MS, LARGADA_HOLD_MIN_MS, LARGADA_HOLD_MAX_MS,
   LARGADA_HOLD_RATE, LARGADA_FALL_RATE, LARGADA_ZONE_SCALE,
   VISUAL_CATCHUP_HALFLIFE_MS, BULLET_TIME_SLOWDOWN, NORMAL_LEG_SPEED_T_PER_MS, LEG_PROGRESS_CAP,
-  EVENT_LOOKAHEAD_STEPS,
+  MAX_VISUAL_OVERSHOOT_T, GRID_GAP_RAMP_EVENTS,
 } from './viewConstants.js';
 import { track as trackEvent } from '../telemetry/analytics.js';
 import { juice } from './juice.js';
@@ -105,6 +105,8 @@ export class RaceScene extends Phaser.Scene {
   private trackGraphics!: Phaser.GameObjects.Graphics;
   private startFinishLabel?: Phaser.GameObjects.Text;
   private pitLabel?: Phaser.GameObjects.Text;
+  /** Rótulos dos marcos sem desafio (`TrackDef.landmarks`, ex.: Blanchimont, Kemmel Straight) — mesmo padrão de destruir/recriar do startFinishLabel/pitLabel. */
+  private landmarkLabels: Phaser.GameObjects.Text[] = [];
   private icons = new Map<string, IconEntry>();
   private panel!: Phaser.GameObjects.Container;
 
@@ -268,10 +270,25 @@ export class RaceScene extends Phaser.Scene {
 
     this.tickVisualPositions(0);
     this.updateHud();
-    this.showCountdown(() => {
-      this.raceStarted = true;
-      this.startEventCycle();
-    });
+
+    // Boost da largada (sessão 18, pedido do PO): a escolha precisa acontecer
+    // ANTES da contagem 3-2-1-JÁ, não depois — sem isso, o jogador ficava
+    // decidindo o boost com a corrida "rolando" atrás (raceStarted já true),
+    // dando tempo de sobra pro pelotão descolar visualmente antes da largada
+    // de verdade acontecer. `startEventCycle()` pula esse mesmo boost de novo
+    // (ver checagem de `eventIndex === 0` lá) já que foi resolvido aqui.
+    const firstEvent = currentEvent(this.raceState);
+    const startRace = () => {
+      this.showCountdown(() => {
+        this.raceStarted = true;
+        this.startEventCycle();
+      });
+    };
+    if (firstEvent.boostEligible) {
+      this.showBoostChoice(firstEvent, startRace);
+    } else {
+      startRace();
+    }
   }
 
   /** Contagem 3-2-1 + "Já!" antes da largada (T-106 — juice). */
@@ -374,6 +391,20 @@ export class RaceScene extends Phaser.Scene {
     this.pitLabel = this.add.text(pit.x, pit.y + 12, 'PIT', {
       fontSize: '8px', color: '#64b5f6',
     }).setOrigin(0.5);
+
+    // Marcos nomeados sem desafio (ex.: Blanchimont, Kemmel Straight — sessão
+    // 18, pedido do PO: continuam visíveis no mapa, mas não geram frenagem/
+    // saída própria, ver TrackDef.landmarks/buildEventSequence).
+    this.landmarkLabels.forEach((t) => t.destroy());
+    this.landmarkLabels = [];
+    for (const landmark of this.track.landmarks ?? []) {
+      const s = normalizedToScreen(this.track.path[landmark.pathIndex], TRACK_RECT);
+      g.fillStyle(0x888888, 1);
+      g.fillCircle(s.x, s.y, 3);
+      this.landmarkLabels.push(
+        this.add.text(s.x, s.y - 10, landmark.name, { fontSize: '8px', color: '#aaaaaa' }).setOrigin(0.5)
+      );
+    }
   }
 
   /**
@@ -419,15 +450,39 @@ export class RaceScene extends Phaser.Scene {
   }
 
   /**
-   * Avança `visualPlayerT` continuamente em direção ao PRÓXIMO evento
-   * (espiado com antecedência — `state.events` é pré-computado), nunca em
-   * direção ao evento atual (que fica parado até `advance()` rodar) — ver
-   * comentário completo em `NORMAL_LEG_SPEED_T_PER_MS` (viewConstants.ts)
-   * sobre por que perseguir um alvo fixo não resolvia o "carro parado".
-   * `LEG_PROGRESS_CAP` trava o avanço perto da marca do próximo evento, sem
-   * chegar/passar antes de `advance()` commitar. Recalcula a distância já
-   * percorrida do zero a cada frame (não acumula um contador à parte), então
-   * a transição para o próximo evento não precisa de nenhum reset explícito.
+   * Posição (T, 0..1) do próximo evento com pathIndex DIFERENTE do atual —
+   * pula o par frenagem/saída da MESMA curva (pathIndex igual, a saída soma
+   * só +0.5) e para na próxima curva de verdade. Usado como teto extra em
+   * `advancePlayerRefT`: sem isso, um teto fixo em fração da volta
+   * (`MAX_VISUAL_OVERSHOOT_T`) pode ultrapassar visualmente uma curva
+   * curada que fica perto demais da atual — ex.: em Interlagos, a largada
+   * fica a só ~1,6% da volta de "S do Senna" (bem menos que o teto de 3,5%),
+   * então o ícone passava por cima de "S do Senna" ainda durante a largada,
+   * como se já estivesse na curva seguinte (bug reportado pelo PO). `Infinity`
+   * se não achar nenhum (fim da corrida) — o teto fixo assume sozinho nesse caso.
+   */
+  private nextDistinctCornerT(fromIndex: number): number {
+    const s = this.raceState;
+    const curPathIndex = Math.floor(pathIndexForEvent(s.events[fromIndex], this.track));
+    for (let i = fromIndex + 1; i < s.events.length; i++) {
+      const pi = Math.floor(pathIndexForEvent(s.events[i], this.track));
+      if (pi !== curPathIndex) return pathIndexToT(pi, this.track.path.length);
+    }
+    return Infinity;
+  }
+
+  /**
+   * Avança `visualPlayerT` continuamente a partir da posição do evento ATUAL
+   * (`currentEvent`, ainda não resolvido — nunca de um evento futuro), até o
+   * MENOR entre 2 tetos: um fixo em fração da volta (`MAX_VISUAL_OVERSHOOT_T`)
+   * e a posição da PRÓXIMA curva curada diferente da atual
+   * (`nextDistinctCornerT`) — dá a sensação de movimento contínuo sem deixar
+   * o ícone visualmente ultrapassar nem a curva sendo desafiada agora, nem a
+   * curva seguinte (bug reportado 3x pelo PO — ver os comentários completos
+   * em `MAX_VISUAL_OVERSHOOT_T`, viewConstants.ts, e em
+   * `nextDistinctCornerT` acima). Recalcula a distância já percorrida do
+   * zero a cada frame (não acumula um contador à parte), então a transição
+   * para o próximo evento não precisa de nenhum reset explícito.
    */
   private advancePlayerRefT(dtMs: number): number {
     const s = this.raceState;
@@ -445,11 +500,11 @@ export class RaceScene extends Phaser.Scene {
       return this.visualPlayerT;
     }
 
-    // Mira alguns eventos à frente, não só o próximo — ver EVENT_LOOKAHEAD_STEPS.
-    const lookaheadIndex = Math.min(s.eventIndex + EVENT_LOOKAHEAD_STEPS, s.events.length - 1);
-    const nextEvent = s.events[lookaheadIndex] ?? currentEvent(s);
-    const nextT = pathIndexToT(pathIndexForEvent(nextEvent, this.track), this.track.path.length);
-    const legDist = Math.max(0, shortestDeltaT(curT, nextT));
+    // Menor entre o teto fixo e a distância até a PRÓXIMA curva curada
+    // diferente da atual — ver comentário completo em `nextDistinctCornerT`.
+    const nextCornerT = this.nextDistinctCornerT(s.eventIndex);
+    const distToNextCorner = Number.isFinite(nextCornerT) ? Math.max(0, shortestDeltaT(curT, nextCornerT)) : Infinity;
+    const legDist = Math.min(MAX_VISUAL_OVERSHOOT_T, distToNextCorner);
 
     const speedTPerMs = this.bulletTime
       ? NORMAL_LEG_SPEED_T_PER_MS / BULLET_TIME_SLOWDOWN
@@ -496,7 +551,20 @@ export class RaceScene extends Phaser.Scene {
       entry.circle.setFillStyle(this.iconColor(standing));
       entry.label.setText(String(standing.position));
 
-      const gapToPlayer = standing.gapToLeader - this.frozenPlayerGapToLeader;
+      // `gapToLeader` no grid recém-criado já reflete o gap de LARGADA (posição
+      // no grid — ver `createGridSim`, ~0,4s por posição, igual um gap real de
+      // classificação — até ~4,4s de ponta a ponta num grid de 12), não um gap
+      // de corrida ainda. Aplicar esse gap inteiro como distância na pista logo
+      // nos primeiros eventos espalhava o pelotão por boa parte da volta antes
+      // mesmo do jogador terminar de sair da largada — parecia (e era) o
+      // pelotão inteiro já "correndo" antes da bandeira verde de verdade (bug
+      // reportado pelo PO, visível até no 1º desafio de frenagem, não só
+      // durante a largada). Rampa ao longo dos primeiros `GRID_GAP_RAMP_EVENTS`
+      // eventos resolvidos (não é tudo-ou-nada no evento 0): o pelotão começa
+      // visualmente junto, igual um grid de largada de verdade, e só passa a
+      // espalhar pelo gap real conforme a corrida avança de fato.
+      const rampFactor = Math.min(1, this.raceState.eventIndex / GRID_GAP_RAMP_EVENTS);
+      const gapToPlayer = rampFactor * (standing.gapToLeader - this.frozenPlayerGapToLeader);
       const clampedGap = Math.max(-MAX_VISUAL_GAP_SECONDS, Math.min(MAX_VISUAL_GAP_SECONDS, gapToPlayer));
       const targetT = refT - clampedGap / SECONDS_PER_LAP_VISUAL;
 
@@ -864,14 +932,18 @@ export class RaceScene extends Phaser.Scene {
     this.pendingNitro = false;
     this.pitAnnounced = false;
 
-    if (ev.boostEligible) {
+    // Boost do 1º evento (largada) já foi escolhido ANTES do countdown (ver
+    // create()) — `eventIndex === 0` identifica esse evento sem precisar de
+    // uma flag à parte (só é 0 até a largada resolver, nunca mais depois).
+    if (ev.boostEligible && this.raceState.eventIndex !== 0) {
       this.showBoostChoice(ev);
       return;
     }
     this.showPreChallenge(ev);
   }
 
-  private showBoostChoice(ev: RaceEvent): void {
+  /** `onChosen` (sessão 18): pra o boost da largada, chamado ANTES do countdown — o padrão (dentro do ciclo normal) é seguir pro desafio do próprio evento. */
+  private showBoostChoice(ev: RaceEvent, onChosen: () => void = () => this.showPreChallenge(ev)): void {
     this.clearPanel();
     this.panel.add(this.add.text(16, 12, 'Boost da volta — escolha 1:', { fontSize: '14px', color: '#fff' }));
     const allBoosts: BoostId[] = [
@@ -884,7 +956,7 @@ export class RaceScene extends Phaser.Scene {
       const btn = this.makeButton(16, rowY, CANVAS_WIDTH - 32, 40, BOOST_LABELS[id], 0xffd54f, () => {
         trackEvent('boost_chosen', { trackId: this.track.id, lap: this.raceState.lap, options, chosen: id });
         applyBoost(this.raceState, id);
-        this.showPreChallenge(ev);
+        onChosen();
       });
       this.panel.add(btn);
       // Feedback do PO: os nomes dos boosts não deixavam claro o efeito (Claude-Racing.md §2.21).

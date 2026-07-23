@@ -92,6 +92,21 @@ function draw() {
     ctx.fillText(`${i + 1}. ${corner.name}`, x + 14, labelY);
   });
 
+  // marcos sem desafio (landmarks — sessão 18: Blanchimont, Kemmel Straight etc.)
+  for (const landmark of track.landmarks ?? []) {
+    const point = track.path[landmark.pathIndex];
+    const [x, y] = toScreen(point);
+
+    ctx.fillStyle = '#888';
+    ctx.beginPath();
+    ctx.arc(x, y, 6, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#aaa';
+    ctx.font = '10px system-ui';
+    ctx.fillText(landmark.name, x + 10, y - 10);
+  }
+
   // legenda
   ctx.fillStyle = '#888';
   ctx.font = '11px system-ui';

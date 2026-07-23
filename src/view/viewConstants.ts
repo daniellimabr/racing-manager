@@ -142,36 +142,38 @@ export const TWEEN_DURATION_MS = 1000;
 export const NORMAL_LEG_SPEED_T_PER_MS = 0.00003;
 /** Quanto maior, mais lento o "bullet time" (divide a velocidade normal de avanço durante a decisão/desafio ativo). */
 export const BULLET_TIME_SLOWDOWN = 10;
-/** Fração máxima da distância até o alvo (`EVENT_LOOKAHEAD_STEPS` eventos à frente) que o avanço contínuo pode cobrir antes de `advance()` commitar a transição (nunca chega a 100%, evita "ultrapassar" visualmente um evento ainda não resolvido). */
+/** Fração máxima da distância até o teto (`MAX_VISUAL_OVERSHOOT_T`) que o avanço contínuo pode cobrir antes de `advance()` commitar a transição (nunca chega a 100%, evita "ultrapassar" visualmente o próprio teto). */
 export const LEG_PROGRESS_CAP = 0.95;
 
 /**
  * Sessão 15, 3ª rodada (feedback do PO: "os carros ainda estão parando no
  * mapa, aguardando o input do desafio"): mirar só no PRÓXIMO evento
  * (`eventIndex+1`) não bastava — pra qualquer curva, a perna frenagem→saída
- * (mesma curva) é bem curta (só 0,5 de 20 `pathIndex`, ~2,5% da volta).
- * Medido direto (`RaceScene.visualPlayerT`, sessão de diagnóstico via
- * Playwright): o avanço batia no teto (`LEG_PROGRESS_CAP`) em bem menos de
- * 1s e FICAVA PARADO os ~4,4s restantes da frenagem de 2 etapas — exatamente
- * o "parado esperando" que o PO reportou, não uma percepção errada.
+ * (mesma curva) é bem curta (só 0,5 de 20 `pathIndex`, ~2,5% da volta), e o
+ * avanço batia no teto em bem menos de 1s, ficando parado o resto da espera.
+ * A correção original (`EVENT_LOOKAHEAD_STEPS`, mirar N eventos à frente em
+ * vez de só o próximo) resolvia o "parado" trocando o alvo por um evento bem
+ * mais à frente — mas "N eventos" é uma distância que varia MUITO conforme a
+ * pista (em Interlagos, mais curvas por volta = eventos mais próximos entre
+ * si; curvas combinadas/curadas como 1 desafio só mudam a densidade também).
+ * Isso é exatamente a causa raiz do bug reportado 3x pelo PO em sessões
+ * seguintes ("carro aparece bem mais à frente da curva anunciada no desafio
+ * e no HUD"): com N=4, o avanço contínuo tinha permissão de cobrir até 95%
+ * da distância até um evento 4 passos à frente do atual — em pistas com
+ * curvas mais densas, isso já passava visualmente de 1-2 curvas reais, então
+ * o ícone ficava adiantado do desafio/rótulo (que sempre reflete o evento
+ * ATUAL, ainda não resolvido), não só percepção.
  *
- * Mirando alguns eventos à frente (não só o próximo), a perna cobre bem mais
- * que 1 corner-a-corner de verdade em Spa — distância de sobra pra nunca
- * bater no teto dentro da janela de um desafio normal (mesmo o pior caso,
- * frenagem em 2 etapas + boost, gira uns 3,5-4s; na velocidade de bullet
- * time isso cobre só ~1% da volta). `advance()` continua sendo o único ponto
- * que de fato "commita" a posição — este valor só afeta até onde o avanço
- * contínuo pode chegar SEM ultrapassar visualmente eventos ainda não
- * resolvidos.
- *
- * 2 já resolvia a maioria dos casos, mas sobrava um resíduo específico: como
- * a largada e a frenagem da 1ª curva de Spa compartilham o mesmo `pathIndex`
- * (0 — ver `pathIndexForEvent`), o avanço já feito durante a largada "come"
- * parte do teto da frenagem seguinte (o teto é medido a partir do MESMO
- * `curT`=0 pros dois eventos) — sobrava menos folga do que o normal bem no
- * início da corrida. Subido pra 4 pra dar folga mesmo nesse caso.
+ * Fix de verdade: desacoplar "quanto o avanço pode cobrir" de "quantos
+ * eventos existem pela frente" — usar um teto FIXO em fração da volta
+ * (`MAX_VISUAL_OVERSHOOT_T`), pequeno o suficiente pra o ícone nunca sair
+ * visualmente da vizinhança da curva sendo desafiada, mas maior que a perna
+ * degenerada frenagem→saída da mesma curva (~0,025 da volta) pra continuar
+ * dando "fôlego" de animação nesse caso sem precisar espiar `state.events`
+ * nenhuma distância à frente. `advance()` continua sendo o único ponto que
+ * de fato "commita" a posição.
  */
-export const EVENT_LOOKAHEAD_STEPS = 4;
+export const MAX_VISUAL_OVERSHOOT_T = 0.035;
 /** Meia-vida (ms) da suavização de polimento por ícone — absorve saltos pequenos de gap entre carros (ex.: ultrapassagem registrada no grid), não representa mais a velocidade geral do crawl (isso agora é NORMAL_LEG_SPEED_T_PER_MS/BULLET_TIME_SLOWDOWN). */
 export const VISUAL_CATCHUP_HALFLIFE_MS = 220;
 
@@ -205,6 +207,19 @@ export const CHALLENGE_PREP_MS = 600;
  */
 export const SECONDS_PER_LAP_VISUAL = NOMINAL_LAP_SECONDS;
 export const MAX_VISUAL_GAP_SECONDS = SECONDS_PER_LAP_VISUAL * 0.9;
+
+/**
+ * Nº de eventos resolvidos até o gap de largada (grid) passar a valer 100%
+ * como distância visual na pista (ver comentário em `tickVisualPositions`,
+ * RaceScene.ts) — antes disso, o gap é aplicado em rampa linear
+ * (`eventIndex / GRID_GAP_RAMP_EVENTS`), não tudo de uma vez no evento 0.
+ * 8 cobre aproximadamente as 2 primeiras curvas curadas (frenagem+saída ×2)
+ * depois da largada — dá tempo do pelotão "descolar" visualmente aos poucos,
+ * como um grid de largada de verdade, em vez de saltar pro gap de
+ * classificação inteiro (até ~4,4s num grid de 12) assim que o 1º evento
+ * resolve.
+ */
+export const GRID_GAP_RAMP_EVENTS = 8;
 
 export const TIER_COLORS: Record<Tier, number> = {
   purple: 0xb266ff,

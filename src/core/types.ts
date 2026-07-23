@@ -32,6 +32,13 @@ export interface TrackDef {
   /** índice em `path` onde a entrada do pit fica posicionada */
   pitPathIndex: number;
   corners: CornerDef[];
+  /**
+   * Marcos nomeados sem desafio de frenagem/saída (ex.: Blanchimont, Kemmel
+   * Straight) — só um rótulo visível no mapa (`RaceScene.drawTrack`), não
+   * entram em `buildEventSequence` (core/track.ts, que só itera `corners`).
+   * Opcional: pistas antigas sem esse conceito continuam válidas sem o campo.
+   */
+  landmarks?: CornerDef[];
 }
 
 /** Um evento concreto na sequência da corrida (pré-computado a partir da pista) */
