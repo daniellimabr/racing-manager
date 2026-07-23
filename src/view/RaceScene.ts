@@ -136,6 +136,8 @@ export class RaceScene extends Phaser.Scene {
   private pitAnnounced = false;
   private raceStartTime = 0;
   private raceEnded = false;
+  /** true só depois que a contagem 3-2-1-JÁ termina e o 1º evento (largada) começa a ser mostrado — ver update()/tickVisualPositions. */
+  private raceStarted = false;
 
   // Bullet time (sessão 15): true enquanto o jogador está decidindo/resolvendo
   // o desafio do evento atual — desacelera o avanço contínuo dos carros sem
@@ -242,6 +244,7 @@ export class RaceScene extends Phaser.Scene {
     this.paused = false;
     this.pauseOverlay = undefined;
     this.visualPlayerTInitialized = false;
+    this.raceStarted = false;
     this.overtakeToggleOn = false;
     this.nitroToggleOn = false;
     trackEvent('race_start', { trackId: this.track.id });
@@ -265,7 +268,10 @@ export class RaceScene extends Phaser.Scene {
 
     this.tickVisualPositions(0);
     this.updateHud();
-    this.showCountdown(() => this.startEventCycle());
+    this.showCountdown(() => {
+      this.raceStarted = true;
+      this.startEventCycle();
+    });
   }
 
   /** Contagem 3-2-1 + "Já!" antes da largada (T-106 — juice). */
@@ -308,7 +314,11 @@ export class RaceScene extends Phaser.Scene {
     } else if (this.challengeActive) {
       this.drawCursor();
     }
-    this.tickVisualPositions(dt);
+    // Antes da largada (durante a contagem 3-2-1-JÁ), congela o avanço
+    // visual: sem isso, o crawl contínuo (advancePlayerRefT) já mirava o
+    // próximo evento e os carros derivavam pela pista antes do jogador
+    // sequer ver o desafio de largada (bug reportado pelo PO — Claude-Racing.md).
+    this.tickVisualPositions(this.raceStarted ? dt : 0);
   }
 
   // ---------- desenho estático ----------
