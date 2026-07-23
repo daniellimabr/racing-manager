@@ -10,7 +10,7 @@ import { currentChampionshipTrackId, isChampionshipComplete } from '../core/cham
 import { findPilot, pilotTierWeights, pilotPaceFactor, pilotDevCarroBonus } from '../core/pilots.js';
 import type { TeammateProfile } from '../core/grid.js';
 import { CANVAS_WIDTH, CANVAS_HEIGHT } from './viewConstants.js';
-import { TRACKS } from './RaceScene.js';
+import { TRACKS, DEFAULT_TRACK_ID } from './RaceScene.js';
 import { juice } from './juice.js';
 
 /**
@@ -32,6 +32,17 @@ export class HubScene extends Phaser.Scene {
   private runButtonBg!: Phaser.GameObjects.Rectangle;
   private runButtonText!: Phaser.GameObjects.Text;
   private partsSummaryText!: Phaser.GameObjects.Text;
+
+  /**
+   * Pista da corrida avulsa (botão CORRER) — antes fixa em Spa (pedido do PO:
+   * "tenho que correr o campeonato, correr em Spa, pra chegar em Interlagos
+   * pra validar"). Agora escolhida por um seletor de pills logo acima do
+   * botão CORRER; não afeta o campeonato (`ChampionshipScene`), que continua
+   * com seu próprio calendário fixo.
+   */
+  private selectedTrackId: string = DEFAULT_TRACK_ID;
+  private trackButtonBgs: Record<string, Phaser.GameObjects.Rectangle> = {};
+  private trackButtonTexts: Record<string, Phaser.GameObjects.Text> = {};
 
   constructor() {
     super('HubScene');
@@ -65,6 +76,7 @@ export class HubScene extends Phaser.Scene {
     this.buildGoldPanel();
     this.buildPartsSummary();
     this.buildChampionshipButton();
+    this.buildTrackSelector();
     this.buildRunButton();
 
     this.input.once('pointerdown', () => juice.unlock());
@@ -220,7 +232,8 @@ export class HubScene extends Phaser.Scene {
    * `ChampionshipScene`, que trata os 3 estados (não iniciado/em andamento/
    * encerrado). O rótulo aqui já dá uma prévia do estado sem precisar entrar.
    * Fica no espaço livre entre o resumo de peças e o botão CORRER (que
-   * continua sendo a corrida avulsa em Spa, sem tocar no campeonato).
+   * continua sendo uma corrida avulsa, com pista escolhida no seletor logo
+   * abaixo — ver `buildTrackSelector` — sem tocar no campeonato).
    */
   private buildChampionshipButton(): void {
     const y = 560;
@@ -244,6 +257,52 @@ export class HubScene extends Phaser.Scene {
     const trackId = currentChampionshipTrackId(champ);
     const trackName = trackId ? TRACKS[trackId].name : '';
     return `CAMPEONATO — Corrida ${champ.raceIndex + 1}/2 (${trackName})`;
+  }
+
+  /**
+   * Seletor de pista pra corrida avulsa (não o campeonato) — 1 pill por
+   * entrada de `TRACKS` (RaceScene.ts), lado a lado. Fica entre o botão de
+   * campeonato e o botão CORRER; a seleção não persiste entre sessões (reseta
+   * pra `DEFAULT_TRACK_ID` a cada `create()`, igual ao resto do estado
+   * efêmero da Hub).
+   */
+  private buildTrackSelector(): void {
+    const y = 620;
+    this.add.text(16, y, 'PISTA (corrida avulsa)', { fontSize: '11px', color: '#8899aa' });
+
+    const trackIds = Object.keys(TRACKS);
+    const gap = 8;
+    const w = (CANVAS_WIDTH - 32 - gap * (trackIds.length - 1)) / trackIds.length;
+    const btnY = y + 16;
+    const h = 36;
+
+    trackIds.forEach((trackId, i) => {
+      const x = 16 + i * (w + gap);
+      const bg = this.add.rectangle(x, btnY, w, h, 0x2a2e34).setOrigin(0, 0)
+        .setStrokeStyle(1, 0x444a52).setInteractive({ useHandCursor: true });
+      const text = this.add.text(x + w / 2, btnY + h / 2, TRACKS[trackId].name, {
+        fontSize: '12px', color: '#cccccc', fontStyle: 'bold',
+      }).setOrigin(0.5);
+      bg.on('pointerdown', () => {
+        juice.click();
+        this.selectedTrackId = trackId;
+        this.updateTrackSelectorVisuals();
+        this.updateHud();
+      });
+      this.trackButtonBgs[trackId] = bg;
+      this.trackButtonTexts[trackId] = text;
+    });
+
+    this.updateTrackSelectorVisuals();
+  }
+
+  private updateTrackSelectorVisuals(): void {
+    for (const [trackId, bg] of Object.entries(this.trackButtonBgs)) {
+      const selected = trackId === this.selectedTrackId;
+      bg.setFillStyle(selected ? 0x2e5c3e : 0x2a2e34);
+      bg.setStrokeStyle(1, selected ? 0x66bb6a : 0x444a52);
+      this.trackButtonTexts[trackId].setColor(selected ? '#a5d6a7' : '#cccccc');
+    }
   }
 
   private buildRunButton(): void {
@@ -297,7 +356,8 @@ export class HubScene extends Phaser.Scene {
     const affordable = canAffordRace(this.save.energy);
     this.runButtonBg.setFillStyle(affordable ? 0x2ecc71 : 0x444a52);
     this.runButtonText.setColor(affordable ? '#111111' : '#777777');
-    this.runButtonText.setText(affordable ? `CORRER (-${ENERGY_COST_PER_RACE} energia)` : 'Energia insuficiente');
+    const trackName = TRACKS[this.selectedTrackId].name;
+    this.runButtonText.setText(affordable ? `CORRER em ${trackName} (-${ENERGY_COST_PER_RACE} energia)` : 'Energia insuficiente');
   }
 
   /**
@@ -325,6 +385,6 @@ export class HubScene extends Phaser.Scene {
       ...DEFAULT_CAR_SETUP,
       zoneScale: computeZoneScale(this.save.inventory) + devCarroBonus,
     };
-    this.scene.start('RaceScene', { carSetup, teammate: this.teammateProfile() });
+    this.scene.start('RaceScene', { carSetup, teammate: this.teammateProfile(), trackId: this.selectedTrackId });
   }
 }
